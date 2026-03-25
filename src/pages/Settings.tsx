@@ -30,8 +30,6 @@ import { useSubscription } from "@/hooks/useSubscription";
 import { useWhatsAppInstance, useWhatsAppAutomations, useToggleAutomation } from "@/hooks/useWhatsApp";
 import { useAuth } from "@/hooks/useAuth";
 import { api } from "@/lib/api-client";
-import { isPhpBackend, PHP_API_URL } from "@/lib/backend-config";
-import { getAccessToken } from "@/lib/php-client";
 import { useQueryClient } from "@tanstack/react-query";
 import { STRIPE_PLANS, SETTINGS_SECTIONS } from "@/lib/stripe-plans";
 import { useFeatureAccess } from "@/hooks/useFeatureAccess";
@@ -55,29 +53,6 @@ const COLOR_PRESETS = [
 ];
 
 async function updateProfessionalRecord(professionalId: string, updates: Record<string, unknown>) {
-  if (isPhpBackend()) {
-    const token = getAccessToken();
-    if (!token) return new Error("Sessão expirada");
-
-    try {
-      const response = await fetch(`${PHP_API_URL}/profile`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(updates),
-      });
-
-      const body = await response.json().catch(() => ({} as { error?: string }));
-      if (!response.ok) return new Error(body.error || "Erro ao salvar");
-
-      return null;
-    } catch (err) {
-      return err instanceof Error ? err : new Error("Erro ao salvar");
-    }
-  }
-
   const { error } = await api.from("professionals").update(updates).eq("id", professionalId);
   return error as Error | null;
 }

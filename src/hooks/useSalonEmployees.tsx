@@ -1,6 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api-client";
-import { isPhpBackend } from "@/lib/backend-config";
 import { useProfessional } from "./useProfessional";
 import { toast } from "sonner";
 
@@ -95,14 +94,13 @@ export const useCreateSalonEmployee = () => {
 
   return useMutation({
     mutationFn: async (employee: EmployeeMutationInput) => {
-      const compatibilityMode = isPhpBackend();
-      const preferredPayload = buildEmployeeInsertPayload(employee, compatibilityMode);
+      const preferredPayload = buildEmployeeInsertPayload(employee, false);
 
       let { data, error } = await api
         .from("salon_employees")
         .insert({ ...preferredPayload, salon_id: professional!.id } as any);
 
-      if (error && !compatibilityMode && isLikelySchemaMismatch(error.message)) {
+      if (error && isLikelySchemaMismatch(error.message)) {
         const fallbackPayload = buildEmployeeInsertPayload(employee, true);
         const retry = await api
           .from("salon_employees")
@@ -129,15 +127,14 @@ export const useUpdateSalonEmployee = () => {
 
   return useMutation({
     mutationFn: async ({ id, ...updates }: Partial<SalonEmployee> & { id: string }) => {
-      const compatibilityMode = isPhpBackend();
-      const preferredPayload = buildEmployeeUpdatePayload(updates as Partial<EmployeeMutationInput>, compatibilityMode);
+      const preferredPayload = buildEmployeeUpdatePayload(updates as Partial<EmployeeMutationInput>, false);
 
       let { data, error } = await api
         .from("salon_employees")
         .update(preferredPayload)
         .eq("id", id);
 
-      if (error && !compatibilityMode && isLikelySchemaMismatch(error.message)) {
+      if (error && isLikelySchemaMismatch(error.message)) {
         const fallbackPayload = buildEmployeeUpdatePayload(updates as Partial<EmployeeMutationInput>, true);
         const retry = await api
           .from("salon_employees")
