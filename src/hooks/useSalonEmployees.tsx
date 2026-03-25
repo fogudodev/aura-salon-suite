@@ -1,6 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api-client";
-import { isPhpBackend } from "@/lib/backend-config";
 import { useProfessional } from "./useProfessional";
 import { toast } from "sonner";
 
