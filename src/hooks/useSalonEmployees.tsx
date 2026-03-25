@@ -94,8 +94,7 @@ export const useCreateSalonEmployee = () => {
 
   return useMutation({
     mutationFn: async (employee: EmployeeMutationInput) => {
-      const compatibilityMode = isPhpBackend();
-      const preferredPayload = buildEmployeeInsertPayload(employee, compatibilityMode);
+      const preferredPayload = buildEmployeeInsertPayload(employee, false);
 
       let { data, error } = await api
         .from("salon_employees")
