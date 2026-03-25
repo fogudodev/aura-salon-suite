@@ -897,33 +897,48 @@ export type Database = {
       }
       clients: {
         Row: {
+          average_ticket: number | null
+          avg_return_interval_days: number | null
           created_at: string
           email: string | null
           id: string
+          last_completed_appointment_at: string | null
           name: string
           notes: string | null
           phone: string | null
           professional_id: string
+          reactivation_score: number | null
+          reactivation_status: string | null
           updated_at: string
         }
         Insert: {
+          average_ticket?: number | null
+          avg_return_interval_days?: number | null
           created_at?: string
           email?: string | null
           id?: string
+          last_completed_appointment_at?: string | null
           name: string
           notes?: string | null
           phone?: string | null
           professional_id: string
+          reactivation_score?: number | null
+          reactivation_status?: string | null
           updated_at?: string
         }
         Update: {
+          average_ticket?: number | null
+          avg_return_interval_days?: number | null
           created_at?: string
           email?: string | null
           id?: string
+          last_completed_appointment_at?: string | null
           name?: string
           notes?: string | null
           phone?: string | null
           professional_id?: string
+          reactivation_score?: number | null
+          reactivation_status?: string | null
           updated_at?: string
         }
         Relationships: [
@@ -2537,6 +2552,176 @@ export type Database = {
           welcome_title?: string | null
         }
         Relationships: []
+      }
+      reactivation_campaign_recipients: {
+        Row: {
+          campaign_id: string
+          client_id: string
+          client_name: string | null
+          client_phone: string | null
+          conversion_booking_id: string | null
+          conversion_value: number | null
+          converted_at: string | null
+          created_at: string
+          delivered_at: string | null
+          error_message: string | null
+          id: string
+          message_payload: string | null
+          sent_at: string | null
+          status: string
+        }
+        Insert: {
+          campaign_id: string
+          client_id: string
+          client_name?: string | null
+          client_phone?: string | null
+          conversion_booking_id?: string | null
+          conversion_value?: number | null
+          converted_at?: string | null
+          created_at?: string
+          delivered_at?: string | null
+          error_message?: string | null
+          id?: string
+          message_payload?: string | null
+          sent_at?: string | null
+          status?: string
+        }
+        Update: {
+          campaign_id?: string
+          client_id?: string
+          client_name?: string | null
+          client_phone?: string | null
+          conversion_booking_id?: string | null
+          conversion_value?: number | null
+          converted_at?: string | null
+          created_at?: string
+          delivered_at?: string | null
+          error_message?: string | null
+          id?: string
+          message_payload?: string | null
+          sent_at?: string | null
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "reactivation_campaign_recipients_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "reactivation_campaigns"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      reactivation_campaigns: {
+        Row: {
+          completed_at: string | null
+          converted_count: number | null
+          created_at: string
+          id: string
+          message_template: string
+          name: string
+          professional_id: string
+          revenue_generated: number | null
+          scheduled_at: string | null
+          segment_filter: Json | null
+          send_limit_per_day: number | null
+          send_mode: string
+          sent_count: number | null
+          started_at: string | null
+          status: string
+          total_recipients: number | null
+          updated_at: string
+        }
+        Insert: {
+          completed_at?: string | null
+          converted_count?: number | null
+          created_at?: string
+          id?: string
+          message_template: string
+          name: string
+          professional_id: string
+          revenue_generated?: number | null
+          scheduled_at?: string | null
+          segment_filter?: Json | null
+          send_limit_per_day?: number | null
+          send_mode?: string
+          sent_count?: number | null
+          started_at?: string | null
+          status?: string
+          total_recipients?: number | null
+          updated_at?: string
+        }
+        Update: {
+          completed_at?: string | null
+          converted_count?: number | null
+          created_at?: string
+          id?: string
+          message_template?: string
+          name?: string
+          professional_id?: string
+          revenue_generated?: number | null
+          scheduled_at?: string | null
+          segment_filter?: Json | null
+          send_limit_per_day?: number | null
+          send_mode?: string
+          sent_count?: number | null
+          started_at?: string | null
+          status?: string
+          total_recipients?: number | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      reactivation_events: {
+        Row: {
+          campaign_id: string | null
+          client_id: string
+          created_at: string
+          event_type: string
+          id: string
+          metadata: Json | null
+          professional_id: string
+          recipient_id: string | null
+          value: number | null
+        }
+        Insert: {
+          campaign_id?: string | null
+          client_id: string
+          created_at?: string
+          event_type?: string
+          id?: string
+          metadata?: Json | null
+          professional_id: string
+          recipient_id?: string | null
+          value?: number | null
+        }
+        Update: {
+          campaign_id?: string | null
+          client_id?: string
+          created_at?: string
+          event_type?: string
+          id?: string
+          metadata?: Json | null
+          professional_id?: string
+          recipient_id?: string | null
+          value?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "reactivation_events_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "reactivation_campaigns"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "reactivation_events_recipient_id_fkey"
+            columns: ["recipient_id"]
+            isOneToOne: false
+            referencedRelation: "reactivation_campaign_recipients"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       reviews: {
         Row: {
