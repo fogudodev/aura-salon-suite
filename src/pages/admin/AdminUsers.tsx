@@ -2,8 +2,6 @@ import { useState } from "react";
 import AdminLayout from "@/components/layout/AdminLayout";
 import { useAllProfessionals, useSupportUsers, useRemoveSupportRole, useIsAdmin } from "@/hooks/useAdmin";
 import { api } from "@/lib/api-client";
-import { isPhpBackend } from "@/lib/backend-config";
-import { setTokens } from "@/lib/php-client";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
