@@ -2,16 +2,17 @@ import { useMemo } from "react";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import { useProfessional } from "@/hooks/useProfessional";
 import { useServices } from "@/hooks/useServices";
-import { useUpsellEvents, useUpsellRules } from "@/hooks/useUpsell";
-import { Loader2, TrendingUp, Target, DollarSign, BarChart3 } from "lucide-react";
+import { useUpsellEvents, useUpsellRules, useUpsellRecipients } from "@/hooks/useUpsell";
+import { Loader2, TrendingUp, Target, DollarSign, BarChart3, Send, CheckCircle, Clock, XCircle } from "lucide-react";
 
 const UpsellDashboard = () => {
   const { data: professional } = useProfessional();
   const { data: events, isLoading: eventsLoading } = useUpsellEvents(professional?.id);
   const { data: rules, isLoading: rulesLoading } = useUpsellRules(professional?.id);
+  const { data: recipients, isLoading: recipientsLoading } = useUpsellRecipients(professional?.id);
   const { data: services } = useServices();
 
-  const isLoading = eventsLoading || rulesLoading;
+  const isLoading = eventsLoading || rulesLoading || recipientsLoading;
 
   const serviceMap = useMemo(() => {
     const map: Record<string, string> = {};
@@ -23,7 +24,7 @@ const UpsellDashboard = () => {
     const allEvents = events || [];
     const suggested = allEvents.filter(e => e.status === "suggested").length;
     const accepted = allEvents.filter(e => e.status === "accepted").length;
-    const totalRevenue = allEvents.filter(e => e.status === "accepted").reduce((sum, e) => sum + (e.upsell_revenue || 0), 0);
+    const totalRevenue = allEvents.filter(e => e.status === "accepted").reduce((sum, e) => sum + (e.upsell_revenue || e.value || 0), 0);
     const conversionRate = suggested > 0 ? Math.round((accepted / suggested) * 100) : 0;
 
     // Top combos
@@ -39,7 +40,7 @@ const UpsellDashboard = () => {
         };
       }
       comboMap[key].count++;
-      comboMap[key].revenue += e.upsell_revenue || 0;
+      comboMap[key].revenue += e.upsell_revenue || e.value || 0;
     });
     const topCombos = Object.values(comboMap).sort((a, b) => b.count - a.count).slice(0, 5);
 
@@ -49,10 +50,20 @@ const UpsellDashboard = () => {
       const d = new Date(e.created_at);
       return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear() && e.status === "accepted";
     });
-    const monthlyRevenue = thisMonth.reduce((sum, e) => sum + (e.upsell_revenue || 0), 0);
+    const monthlyRevenue = thisMonth.reduce((sum, e) => sum + (e.upsell_revenue || e.value || 0), 0);
 
     return { suggested, accepted, totalRevenue, conversionRate, topCombos, monthlyRevenue };
   }, [events, serviceMap]);
+
+  const recipientStats = useMemo(() => {
+    const all = recipients || [];
+    return {
+      pending: all.filter(r => r.status === "pending").length,
+      sent: all.filter(r => r.status === "sent").length,
+      accepted: all.filter(r => r.status === "accepted").length,
+      total: all.length,
+    };
+  }, [recipients]);
 
   return (
     <DashboardLayout title="Upsell Inteligente" subtitle="Acompanhe o desempenho das sugestões de serviços">
@@ -64,16 +75,23 @@ const UpsellDashboard = () => {
         <div className="space-y-6 max-w-4xl">
           {/* Stats cards */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <StatCard icon={Target} label="Sugestões" value={String(stats.suggested)} color="text-blue-400" />
-            <StatCard icon={TrendingUp} label="Aceitas" value={String(stats.accepted)} color="text-emerald-400" />
+            <StatCard icon={Send} label="Ofertas enviadas" value={String(stats.suggested)} color="text-blue-400" />
+            <StatCard icon={CheckCircle} label="Aceitas" value={String(stats.accepted)} color="text-emerald-400" />
             <StatCard icon={BarChart3} label="Taxa de conversão" value={`${stats.conversionRate}%`} color="text-purple-400" />
             <StatCard icon={DollarSign} label="Receita este mês" value={`R$ ${stats.monthlyRevenue.toFixed(2)}`} color="text-amber-400" />
           </div>
 
           {/* Total revenue highlight */}
           <div className="glass-card rounded-2xl p-6 text-center">
-            <p className="text-xs text-muted-foreground mb-1">Receita total gerada por Upsell</p>
+            <p className="text-xs text-muted-foreground mb-1">Receita adicional total gerada por Upsell</p>
             <p className="text-3xl font-bold text-accent">R$ {stats.totalRevenue.toFixed(2)}</p>
+          </div>
+
+          {/* Recipients status */}
+          <div className="grid grid-cols-3 gap-3">
+            <MiniCard icon={Clock} label="Pendentes" value={recipientStats.pending} color="text-yellow-400" />
+            <MiniCard icon={Send} label="Enviadas" value={recipientStats.sent} color="text-blue-400" />
+            <MiniCard icon={CheckCircle} label="Convertidas" value={recipientStats.accepted} color="text-emerald-400" />
           </div>
 
           {/* Top combos */}
@@ -99,6 +117,26 @@ const UpsellDashboard = () => {
               </div>
             )}
           </div>
+
+          {/* Recent recipients */}
+          <div className="glass-card rounded-2xl p-5">
+            <h3 className="font-semibold text-foreground mb-3">Últimas ofertas enviadas</h3>
+            {(recipients || []).length === 0 ? (
+              <p className="text-sm text-muted-foreground">Nenhuma oferta enviada ainda.</p>
+            ) : (
+              <div className="space-y-2 max-h-80 overflow-y-auto">
+                {(recipients || []).slice(0, 20).map(r => (
+                  <div key={r.id} className="flex items-center justify-between p-3 rounded-xl bg-muted/30 border border-border">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm text-foreground truncate">{r.client_phone || "—"}</p>
+                      <p className="text-xs text-muted-foreground truncate">{r.message_payload?.slice(0, 60)}...</p>
+                    </div>
+                    <StatusBadge status={r.status} />
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       )}
     </DashboardLayout>
@@ -114,5 +152,25 @@ const StatCard = ({ icon: Icon, label, value, color }: { icon: any; label: strin
     <p className="text-xl font-bold text-foreground">{value}</p>
   </div>
 );
+
+const MiniCard = ({ icon: Icon, label, value, color }: { icon: any; label: string; value: number; color: string }) => (
+  <div className="glass-card rounded-xl p-3 text-center">
+    <Icon size={14} className={`${color} mx-auto mb-1`} />
+    <p className="text-lg font-bold text-foreground">{value}</p>
+    <p className="text-[11px] text-muted-foreground">{label}</p>
+  </div>
+);
+
+const StatusBadge = ({ status }: { status: string }) => {
+  const config: Record<string, { label: string; className: string }> = {
+    pending: { label: "Pendente", className: "bg-yellow-500/10 text-yellow-500" },
+    sent: { label: "Enviada", className: "bg-blue-500/10 text-blue-500" },
+    delivered: { label: "Entregue", className: "bg-sky-500/10 text-sky-500" },
+    accepted: { label: "Convertida", className: "bg-emerald-500/10 text-emerald-500" },
+    rejected: { label: "Rejeitada", className: "bg-red-500/10 text-red-500" },
+  };
+  const c = config[status] || { label: status, className: "bg-muted text-muted-foreground" };
+  return <span className={`text-[11px] px-2 py-0.5 rounded-full font-medium ${c.className}`}>{c.label}</span>;
+};
 
 export default UpsellDashboard;
