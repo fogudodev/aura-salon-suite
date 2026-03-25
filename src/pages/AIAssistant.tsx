@@ -6,14 +6,10 @@ import { Send, Loader2, User, TrendingUp, Users, DollarSign, Calendar } from "lu
 import ReactMarkdown from "react-markdown";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import lisAvatar from "@/assets/lis-avatar.jpg";
-import { isPhpBackend } from "@/lib/backend-config";
-import { PHP_API_URL } from "@/lib/backend-config";
 
 type Msg = { role: "user" | "assistant"; content: string };
 
-const CHAT_URL = isPhpBackend()
-  ? `${PHP_API_URL}/ai-assistant`
-  : `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/salon-ai-assistant`;
+const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/salon-ai-assistant`;
 
 const suggestedQuestions = [
   { icon: TrendingUp, text: "Faça uma análise completa do meu negócio e me diga onde posso faturar mais" },
