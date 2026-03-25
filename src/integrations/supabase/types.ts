@@ -3015,39 +3015,51 @@ export type Database = {
       upsell_events: {
         Row: {
           booking_id: string | null
+          campaign_id: string | null
           channel: string
+          client_id: string | null
           client_phone: string | null
           created_at: string
+          event_type: string | null
           id: string
           professional_id: string
           recommended_service_id: string | null
           source_service_id: string | null
           status: string
           upsell_revenue: number
+          value: number | null
         }
         Insert: {
           booking_id?: string | null
+          campaign_id?: string | null
           channel?: string
+          client_id?: string | null
           client_phone?: string | null
           created_at?: string
+          event_type?: string | null
           id?: string
           professional_id: string
           recommended_service_id?: string | null
           source_service_id?: string | null
           status?: string
           upsell_revenue?: number
+          value?: number | null
         }
         Update: {
           booking_id?: string | null
+          campaign_id?: string | null
           channel?: string
+          client_id?: string | null
           client_phone?: string | null
           created_at?: string
+          event_type?: string | null
           id?: string
           professional_id?: string
           recommended_service_id?: string | null
           source_service_id?: string | null
           status?: string
           upsell_revenue?: number
+          value?: number | null
         }
         Relationships: [
           {
@@ -3055,6 +3067,20 @@ export type Database = {
             columns: ["booking_id"]
             isOneToOne: false
             referencedRelation: "bookings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "upsell_events_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "upsell_rules"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "upsell_events_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
             referencedColumns: ["id"]
           },
           {
@@ -3080,17 +3106,94 @@ export type Database = {
           },
         ]
       }
+      upsell_recipients: {
+        Row: {
+          booking_id: string | null
+          client_id: string | null
+          client_phone: string | null
+          converted_at: string | null
+          created_at: string
+          delivered_at: string | null
+          id: string
+          message_payload: string | null
+          professional_id: string
+          sent_at: string | null
+          status: string
+          upsell_rule_id: string | null
+        }
+        Insert: {
+          booking_id?: string | null
+          client_id?: string | null
+          client_phone?: string | null
+          converted_at?: string | null
+          created_at?: string
+          delivered_at?: string | null
+          id?: string
+          message_payload?: string | null
+          professional_id: string
+          sent_at?: string | null
+          status?: string
+          upsell_rule_id?: string | null
+        }
+        Update: {
+          booking_id?: string | null
+          client_id?: string | null
+          client_phone?: string | null
+          converted_at?: string | null
+          created_at?: string
+          delivered_at?: string | null
+          id?: string
+          message_payload?: string | null
+          professional_id?: string
+          sent_at?: string | null
+          status?: string
+          upsell_rule_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "upsell_recipients_booking_id_fkey"
+            columns: ["booking_id"]
+            isOneToOne: false
+            referencedRelation: "bookings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "upsell_recipients_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "upsell_recipients_professional_id_fkey"
+            columns: ["professional_id"]
+            isOneToOne: false
+            referencedRelation: "professionals"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "upsell_recipients_upsell_rule_id_fkey"
+            columns: ["upsell_rule_id"]
+            isOneToOne: false
+            referencedRelation: "upsell_rules"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       upsell_rules: {
         Row: {
           conversion_count: number
           created_at: string
+          discount_percentage: number | null
           id: string
           is_active: boolean
+          message_template: string | null
           priority: number
           professional_id: string
           promo_message: string | null
           promo_price: number | null
           recommended_service_id: string
+          send_timing: string | null
           source_service_id: string
           suggestion_count: number
           updated_at: string
@@ -3098,13 +3201,16 @@ export type Database = {
         Insert: {
           conversion_count?: number
           created_at?: string
+          discount_percentage?: number | null
           id?: string
           is_active?: boolean
+          message_template?: string | null
           priority?: number
           professional_id: string
           promo_message?: string | null
           promo_price?: number | null
           recommended_service_id: string
+          send_timing?: string | null
           source_service_id: string
           suggestion_count?: number
           updated_at?: string
@@ -3112,13 +3218,16 @@ export type Database = {
         Update: {
           conversion_count?: number
           created_at?: string
+          discount_percentage?: number | null
           id?: string
           is_active?: boolean
+          message_template?: string | null
           priority?: number
           professional_id?: string
           promo_message?: string | null
           promo_price?: number | null
           recommended_service_id?: string
+          send_timing?: string | null
           source_service_id?: string
           suggestion_count?: number
           updated_at?: string

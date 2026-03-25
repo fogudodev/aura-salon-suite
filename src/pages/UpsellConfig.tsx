@@ -8,8 +8,15 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
+
+const timingOptions = [
+  { value: "immediate", label: "Imediatamente após agendamento" },
+  { value: "3h_before", label: "3h antes do atendimento" },
+  { value: "24h_before", label: "24h antes do atendimento" },
+];
 
 const UpsellConfig = () => {
   const { data: professional } = useProfessional();
@@ -23,6 +30,11 @@ const UpsellConfig = () => {
   const [promoMessage, setPromoMessage] = useState("");
   const [promoPrice, setPromoPrice] = useState("");
   const [priority, setPriority] = useState("1");
+  const [discountPercentage, setDiscountPercentage] = useState("0");
+  const [messageTemplate, setMessageTemplate] = useState(
+    "Oi {nome}, vi que você agendou {servico} 💁‍♀️ Que tal potencializar o resultado com {upsell}? Hoje com {desconto}% OFF 😍 Quer adicionar no seu horário?"
+  );
+  const [sendTiming, setSendTiming] = useState("immediate");
 
   const isLoading = servicesLoading || rulesLoading;
 
@@ -48,6 +60,9 @@ const UpsellConfig = () => {
       promo_message: promoMessage || null,
       promo_price: promoPrice ? parseFloat(promoPrice) : null,
       priority: parseInt(priority) || 1,
+      discount_percentage: parseFloat(discountPercentage) || 0,
+      message_template: messageTemplate || null,
+      send_timing: sendTiming,
       is_active: true,
     }, {
       onSuccess: () => {
@@ -56,6 +71,9 @@ const UpsellConfig = () => {
         setPromoMessage("");
         setPromoPrice("");
         setPriority("1");
+        setDiscountPercentage("0");
+        setMessageTemplate("Oi {nome}, vi que você agendou {servico} 💁‍♀️ Que tal potencializar o resultado com {upsell}? Hoje com {desconto}% OFF 😍 Quer adicionar no seu horário?");
+        setSendTiming("immediate");
       },
     });
   };
@@ -113,19 +131,45 @@ const UpsellConfig = () => {
                   </Select>
                 </div>
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
                 <div>
-                  <label className="text-xs text-muted-foreground mb-1 block">Mensagem promocional (opcional)</label>
-                  <Input value={promoMessage} onChange={e => setPromoMessage(e.target.value)} placeholder="Ex: Promoção especial!" />
+                  <label className="text-xs text-muted-foreground mb-1 block">Preço promocional</label>
+                  <Input type="number" value={promoPrice} onChange={e => setPromoPrice(e.target.value)} placeholder="R$ 0,00" />
                 </div>
                 <div>
-                  <label className="text-xs text-muted-foreground mb-1 block">Preço promocional (opcional)</label>
-                  <Input type="number" value={promoPrice} onChange={e => setPromoPrice(e.target.value)} placeholder="R$ 0,00" />
+                  <label className="text-xs text-muted-foreground mb-1 block">Desconto (%)</label>
+                  <Input type="number" value={discountPercentage} onChange={e => setDiscountPercentage(e.target.value)} min="0" max="100" />
                 </div>
                 <div>
                   <label className="text-xs text-muted-foreground mb-1 block">Prioridade</label>
                   <Input type="number" value={priority} onChange={e => setPriority(e.target.value)} min="1" max="10" />
                 </div>
+                <div>
+                  <label className="text-xs text-muted-foreground mb-1 block">Enviar quando</label>
+                  <Select value={sendTiming} onValueChange={setSendTiming}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {timingOptions.map(t => (
+                        <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">Mensagem promocional (exibida na página pública)</label>
+                <Input value={promoMessage} onChange={e => setPromoMessage(e.target.value)} placeholder="Ex: Promoção especial!" />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">
+                  Template WhatsApp — variáveis: {"{nome}"}, {"{servico}"}, {"{upsell}"}, {"{desconto}"}
+                </label>
+                <Textarea
+                  value={messageTemplate}
+                  onChange={e => setMessageTemplate(e.target.value)}
+                  rows={3}
+                  placeholder="Oi {nome}, vi que você agendou {servico}..."
+                />
               </div>
               <Button onClick={handleAdd} disabled={upsertMutation.isPending} className="w-full sm:w-auto">
                 <Plus size={16} className="mr-2" />
@@ -155,6 +199,11 @@ const UpsellConfig = () => {
                           R$ {Number(rule.promo_price).toFixed(2)}
                         </span>
                       )}
+                      {rule.discount_percentage > 0 && (
+                        <span className="text-xs bg-emerald-500/10 text-emerald-500 px-2 py-0.5 rounded-full">
+                          {rule.discount_percentage}% OFF
+                        </span>
+                      )}
                     </div>
                     {rule.promo_message && (
                       <p className="text-xs text-muted-foreground mt-0.5">{rule.promo_message}</p>
@@ -163,6 +212,9 @@ const UpsellConfig = () => {
                       <span className="text-[11px] text-muted-foreground">
                         {rule.suggestion_count} sugestões · {rule.conversion_count} conversões
                         {rule.suggestion_count > 0 && ` · ${Math.round((rule.conversion_count / rule.suggestion_count) * 100)}% taxa`}
+                      </span>
+                      <span className="text-[11px] text-muted-foreground">
+                        · {timingOptions.find(t => t.value === rule.send_timing)?.label || rule.send_timing}
                       </span>
                     </div>
                   </div>

@@ -223,6 +223,7 @@ const CATEGORY_TO_FLAG: Record<string, string> = {
   "instagram-dm": "instagram_dm",
   "gende-rewards": "gende_rewards",
   "cursos": "courses",
+  "upsell-inteligente": "upsell_inteligente",
 };
 
 // ─── Main Page ───
