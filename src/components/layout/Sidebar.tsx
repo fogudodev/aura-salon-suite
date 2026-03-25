@@ -216,6 +216,7 @@ const Sidebar = ({ mobileOpen, setMobileOpen }: SidebarProps) => {
     "/upsell/config": "upsell_inteligente",
     "/instagram-automation": "instagram_dm",
     "/rewards": "gende_rewards",
+    "/reactivation": "reactivation_engine",
     "/courses": "courses",
     "/courses/list": "courses",
     "/courses/classes": "courses",
