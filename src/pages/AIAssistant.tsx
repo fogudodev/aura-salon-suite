@@ -31,9 +31,7 @@ const AIAssistant = () => {
   }, [messages]);
 
   const streamChat = async (allMessages: Msg[]) => {
-    const token = isPhpBackend()
-      ? localStorage.getItem("php_access_token")
-      : session?.access_token;
+    const token = session?.access_token;
     const resp = await fetch(CHAT_URL, {
       method: "POST",
       headers: {

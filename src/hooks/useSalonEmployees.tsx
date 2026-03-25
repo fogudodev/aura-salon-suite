@@ -127,8 +127,7 @@ export const useUpdateSalonEmployee = () => {
 
   return useMutation({
     mutationFn: async ({ id, ...updates }: Partial<SalonEmployee> & { id: string }) => {
-      const compatibilityMode = isPhpBackend();
-      const preferredPayload = buildEmployeeUpdatePayload(updates as Partial<EmployeeMutationInput>, compatibilityMode);
+      const preferredPayload = buildEmployeeUpdatePayload(updates as Partial<EmployeeMutationInput>, false);
 
       let { data, error } = await api
         .from("salon_employees")

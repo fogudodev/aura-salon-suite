@@ -110,13 +110,7 @@ const AdminUsers = () => {
 
       await api.auth.signOut();
 
-      if (isPhpBackend() && res.data?.access_token) {
-        // PHP/Node backend returns tokens directly
-        setTokens(res.data.access_token, res.data.refresh_token);
-        toast.success(`Logado como "${name}"`);
-        window.location.href = "/";
-      } else {
-        // Supabase mode uses OTP verification
+      {
         const { error: verifyError } = await (api.auth as any).verifyOtp({
           token_hash: res.data.token_hash,
           type: "magiclink",

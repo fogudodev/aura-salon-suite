@@ -53,29 +53,6 @@ const COLOR_PRESETS = [
 ];
 
 async function updateProfessionalRecord(professionalId: string, updates: Record<string, unknown>) {
-  if (isPhpBackend()) {
-    const token = getAccessToken();
-    if (!token) return new Error("Sessão expirada");
-
-    try {
-      const response = await fetch(`${PHP_API_URL}/profile`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(updates),
-      });
-
-      const body = await response.json().catch(() => ({} as { error?: string }));
-      if (!response.ok) return new Error(body.error || "Erro ao salvar");
-
-      return null;
-    } catch (err) {
-      return err instanceof Error ? err : new Error("Erro ao salvar");
-    }
-  }
-
   const { error } = await api.from("professionals").update(updates).eq("id", professionalId);
   return error as Error | null;
 }
