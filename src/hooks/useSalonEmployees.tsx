@@ -134,7 +134,7 @@ export const useUpdateSalonEmployee = () => {
         .update(preferredPayload)
         .eq("id", id);
 
-      if (error && !compatibilityMode && isLikelySchemaMismatch(error.message)) {
+      if (error && isLikelySchemaMismatch(error.message)) {
         const fallbackPayload = buildEmployeeUpdatePayload(updates as Partial<EmployeeMutationInput>, true);
         const retry = await api
           .from("salon_employees")
