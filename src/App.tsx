@@ -39,6 +39,7 @@ import Instructions from "./pages/Instructions";
 import UpsellConfig from "./pages/UpsellConfig";
 import UpsellDashboard from "./pages/UpsellDashboard";
 import Rewards from "./pages/Rewards";
+import Reactivation from "./pages/Reactivation";
 import SystemGuide from "./pages/SystemGuide";
 import InstagramAutomation from "./pages/InstagramAutomation";
 import InstagramCallback from "./pages/InstagramCallback";
