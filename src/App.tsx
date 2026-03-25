@@ -39,6 +39,7 @@ import Instructions from "./pages/Instructions";
 import UpsellConfig from "./pages/UpsellConfig";
 import UpsellDashboard from "./pages/UpsellDashboard";
 import Rewards from "./pages/Rewards";
+import Reactivation from "./pages/Reactivation";
 import SystemGuide from "./pages/SystemGuide";
 import InstagramAutomation from "./pages/InstagramAutomation";
 import InstagramCallback from "./pages/InstagramCallback";
@@ -117,6 +118,7 @@ const AppContent = () => (
             <Route path="/guia" element={<SystemGuide />} />
             <Route path="/instagram-automation" element={<ProtectedRoute><InstagramAutomation /></ProtectedRoute>} />
             <Route path="/rewards" element={<ProtectedRoute><Rewards /></ProtectedRoute>} />
+            <Route path="/reactivation" element={<ProtectedRoute><Reactivation /></ProtectedRoute>} />
             <Route path="/instagram-callback" element={<InstagramCallback />} />
             <Route path="/courses" element={<ProtectedRoute><CourseDashboard /></ProtectedRoute>} />
             <Route path="/courses/list" element={<ProtectedRoute><Courses /></ProtectedRoute>} />

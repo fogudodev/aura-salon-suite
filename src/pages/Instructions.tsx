@@ -635,6 +635,32 @@ const allSections: InstructionSection[] = [
       "Acompanhe o financeiro dos cursos separadamente para ter clareza sobre a rentabilidade de cada treinamento.",
     ],
   },
+  {
+    id: "reactivation",
+    title: "Reativação Inteligente",
+    icon: automationsIcon,
+    plans: ["enterprise"],
+    steps: [
+      "O módulo de Reativação Inteligente identifica automaticamente clientes inativos ou em risco de abandono e permite disparar campanhas personalizadas via WhatsApp para trazê-los de volta.",
+      "Acesse \"Reativação\" no menu lateral para ver o dashboard completo.",
+      "SCORES RFM: O sistema calcula um score de 0 a 100 para cada cliente baseado em Recência (última visita), Frequência (total de visitas) e Valor Monetário (ticket médio).",
+      "Os clientes são classificados como: Hot (80-100), Warm (50-79) ou Cold (abaixo de 50).",
+      "CLIENTES EM RISCO: O sistema identifica automaticamente clientes que estão fora da janela esperada de retorno e que não possuem agendamento futuro.",
+      "CAMPANHAS DE REATIVAÇÃO: Clique em '+ Nova Campanha de Reativação' para criar uma campanha. Defina o nome, mensagem personalizada e o score mínimo dos clientes alvo.",
+      "VARIÁVEIS DISPONÍVEIS: Use {nome}, {servico} e {tempo_sem_visita} nas mensagens para personalização automática.",
+      "EXECUÇÃO: Após criar a campanha, clique em 'Executar' para disparar as mensagens via WhatsApp. O envio é limitado para evitar bloqueios.",
+      "CONVERSÃO AUTOMÁTICA: Se um cliente receber uma mensagem de reativação e agendar dentro de 15 dias, o sistema marca automaticamente como conversão e calcula a receita recuperada.",
+      "MÉTRICAS: No dashboard você acompanha: receita recuperada, clientes reativados, taxa de conversão e total de clientes em risco.",
+      "RECALCULAR SCORES: Clique em 'Recalcular Scores' para atualizar os dados de todos os clientes com base nos atendimentos mais recentes.",
+    ],
+    tips: [
+      "Recalcule os scores semanalmente para manter os dados atualizados.",
+      "Foque nos clientes 'Warm' (50-79) — eles têm maior probabilidade de retorno.",
+      "Personalize as mensagens com o nome do cliente e mencione o serviço que ele costuma fazer.",
+      "Não envie campanhas muito frequentes para o mesmo cliente — respeite o intervalo mínimo.",
+      "Acompanhe a taxa de conversão para saber quais mensagens funcionam melhor.",
+    ],
+  },
 ];
 
 const SECTION_TO_FLAG: Record<string, string> = {
@@ -662,6 +688,7 @@ const SECTION_TO_FLAG: Record<string, string> = {
   "instagram-dm": "instagram_dm",
   "gende-rewards": "gende_rewards",
   "courses": "courses",
+  "reactivation": "reactivation_engine",
 };
 
 const Instructions = () => {
