@@ -30,8 +30,6 @@ import { useSubscription } from "@/hooks/useSubscription";
 import { useWhatsAppInstance, useWhatsAppAutomations, useToggleAutomation } from "@/hooks/useWhatsApp";
 import { useAuth } from "@/hooks/useAuth";
 import { api } from "@/lib/api-client";
-import { isPhpBackend, PHP_API_URL } from "@/lib/backend-config";
-import { getAccessToken } from "@/lib/php-client";
 import { useQueryClient } from "@tanstack/react-query";
 import { STRIPE_PLANS, SETTINGS_SECTIONS } from "@/lib/stripe-plans";
 import { useFeatureAccess } from "@/hooks/useFeatureAccess";
