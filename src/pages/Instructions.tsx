@@ -662,6 +662,7 @@ const SECTION_TO_FLAG: Record<string, string> = {
   "instagram-dm": "instagram_dm",
   "gende-rewards": "gende_rewards",
   "courses": "courses",
+  "reactivation": "reactivation_engine",
 };
 
 const Instructions = () => {
