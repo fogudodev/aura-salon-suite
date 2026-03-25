@@ -39,6 +39,7 @@ import {
   Gift,
   GraduationCap,
   Award,
+  RotateCcw,
   type LucideIcon,
 } from "lucide-react";
 import logo from "@/assets/logo-circle.png";
