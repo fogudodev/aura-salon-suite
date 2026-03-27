@@ -69,7 +69,7 @@ type PaymentConfig = {
 /* ── Helpers ───────────────────────────────────── */
 const DAYS_PT = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
 const DAYS_FULL = ["Domingo", "Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira", "Sexta-feira", "Sábado"];
-const MONTHS_PT = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
+const MONTHS_PT = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
 
 function formatPhone(value: string) {
   const digits = value.replace(/\D/g, "").slice(0, 11);
@@ -127,8 +127,8 @@ const PublicBooking = () => {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [services, setServices] = useState<Service[]>([]);
   const [paymentConfig, setPaymentConfig] = useState<PaymentConfig | null>(null);
-  const [employeeServiceMap, setEmployeeServiceMap] = useState<{employee_id: string; service_id: string}[]>([]);
-  const [reviewStats, setReviewStats] = useState<{avg: number; count: number} | null>(null);
+  const [employeeServiceMap, setEmployeeServiceMap] = useState<{ employee_id: string; service_id: string }[]>([]);
+  const [reviewStats, setReviewStats] = useState<{ avg: number; count: number } | null>(null);
   const [employeeStatsMap, setEmployeeStatsMap] = useState<Record<string, EmployeeStats>>({});
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
@@ -483,7 +483,7 @@ const PublicBooking = () => {
   /* ══ RENDER ═════════════════════════════════════ */
   /* ═══════════════════════════════════════════════ */
   return (
-     <div className="phone-frame" style={{ background: `linear-gradient(160deg, ${accent}08 0%, #f8fafc 40%, ${accent}06 100%)`, fontFamily: "'Inter', 'Poppins', sans-serif" }}>
+    <div className="phone-frame" style={{ background: `linear-gradient(160deg, ${accent}08 0%, #f8fafc 40%, ${accent}06 100%)`, fontFamily: "'Inter', 'Poppins', sans-serif" }}>
       {/* Desktop decorations */}
       <div className="hidden md:block fixed inset-0 overflow-hidden pointer-events-none">
         <div className="absolute -top-40 -left-40 w-[600px] h-[600px] rounded-full opacity-15" style={{ background: `radial-gradient(circle, ${accent} 0%, transparent 60%)` }} />
@@ -752,7 +752,7 @@ type TextColors = { textPrimary: string; textSecondary: string; textMuted: strin
 
 /* ── Step 1: Client Info ── */
 function Step1ClientInfo({ professional, accent, colors, clientName, setClientName, clientPhone, setClientPhone, onNext, reviewStats }: {
-  professional: Professional; accent: string; colors: TextColors; clientName: string; setClientName: (v: string) => void; clientPhone: string; setClientPhone: (v: string) => void; onNext: () => void; reviewStats: {avg: number; count: number} | null;
+  professional: Professional; accent: string; colors: TextColors; clientName: string; setClientName: (v: string) => void; clientPhone: string; setClientPhone: (v: string) => void; onNext: () => void; reviewStats: { avg: number; count: number } | null;
 }) {
   const { textPrimary, textSecondary, textMuted, cardTextPrimary, cardTextSecondary, cardTextMuted } = colors;
   const [errors, setErrors] = useState({ name: "", phone: "" });
@@ -816,7 +816,7 @@ function Step1ClientInfo({ professional, accent, colors, clientName, setClientNa
             <div className="relative">
               <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-base opacity-60">👤</span>
               <input type="text" placeholder="Ex: Maria Silva" value={clientName}
-                onChange={e => { setClientName(e.target.value); if (errors.name) setErrors({...errors, name: ""}); }}
+                onChange={e => { setClientName(e.target.value); if (errors.name) setErrors({ ...errors, name: "" }); }}
                 className="w-full pl-10 pr-4 py-3.5 rounded-xl text-sm font-medium transition-all outline-none focus:ring-2"
                 style={{ background: errors.name ? "#FFF1F2" : "white", border: `1.5px solid ${errors.name ? "#F87171" : clientName ? accent : "#E2E8F0"}`, color: "hsl(0 0% 0%)", boxShadow: "0 1px 3px rgba(0,0,0,0.04)", ["--tw-ring-color" as any]: accent }}
               />
@@ -830,7 +830,7 @@ function Step1ClientInfo({ professional, accent, colors, clientName, setClientNa
             <div className="relative">
               <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-base opacity-60">📱</span>
               <input type="tel" placeholder="(11) 99999-9999" value={clientPhone}
-                onChange={e => { setClientPhone(formatPhone(e.target.value)); if (errors.phone) setErrors({...errors, phone: ""}); }}
+                onChange={e => { setClientPhone(formatPhone(e.target.value)); if (errors.phone) setErrors({ ...errors, phone: "" }); }}
                 className="w-full pl-10 pr-4 py-3.5 rounded-xl text-sm font-medium transition-all outline-none focus:ring-2"
                 style={{ background: errors.phone ? "#FFF1F2" : "white", border: `1.5px solid ${errors.phone ? "#F87171" : clientPhone ? accent : "#E2E8F0"}`, color: "hsl(0 0% 0%)", boxShadow: "0 1px 3px rgba(0,0,0,0.04)", ["--tw-ring-color" as any]: accent }}
               />
@@ -965,7 +965,7 @@ function Step3Services({ services, groupedServices, selected, selectedEmployee, 
                     <div className="flex items-start gap-3">
                       <div className="flex-1 min-w-0">
                         <div className="flex items-start justify-between gap-2">
-                        <h3 className="font-bold text-sm" style={{ color: cardTextPrimary }}>{svc.name}</h3>
+                          <h3 className="font-bold text-sm" style={{ color: cardTextPrimary }}>{svc.name}</h3>
                           {isSelected && <div className="w-5 h-5 rounded-full flex items-center justify-center text-white text-xs flex-shrink-0" style={{ background: accent }}>✓</div>}
                         </div>
                         {svc.description && <p className="text-xs mt-0.5 leading-relaxed" style={{ color: cardTextSecondary }}>{svc.description}</p>}
@@ -1177,15 +1177,15 @@ function Step4DateTime({ service, professional, accent, colors, days, today, sel
                   colors={colors}
                   clientName={clientName}
                   clientPhone={clientPhone}
-                  onClose={() => {}}
+                  onClose={() => { }}
                 />
               )}
             </div>
           )
         ) : (
           <div className="flex flex-col items-center justify-center py-12 rounded-2xl" style={{ background: "#F9FAFB", border: `2px dashed ${accent}20` }}>
-              <span className="text-3xl mb-2">📅</span>
-              <p className="text-sm font-medium" style={{ color: cardTextMuted }}>Selecione um dia para ver os horários</p>
+            <span className="text-3xl mb-2">📅</span>
+            <p className="text-sm font-medium" style={{ color: cardTextMuted }}>Selecione um dia para ver os horários</p>
           </div>
         )}
       </div>
