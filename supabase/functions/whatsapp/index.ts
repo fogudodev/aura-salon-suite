@@ -85,7 +85,11 @@ serve(async (req) => {
         }, { onConflict: "professional_id" });
 
         // Auto-configure webhook for the new instance
-        const webhookUrl = `${Deno.env.get("SUPABASE_URL")}/functions/v1/whatsapp-webhook`;
+        const webhookUrl =
+  Deno.env.get("EVOLUTION_WEBHOOK_URL") ||
+  "https://api.gende.io/functions/v1/whatsapp-webhook";
+
+console.log("Webhook URL usada:", webhookUrl);
         try {
           await fetch(`${EVOLUTION_URL()}/webhook/set/${instanceName}`, {
             method: "POST",

@@ -45,21 +45,21 @@ async function downloadAndTranscribeAudio(
     const audioBuffer = await audioRes.arrayBuffer();
     const base64Audio = btoa(String.fromCharCode(...new Uint8Array(audioBuffer)));
 
-    // Use Lovable AI (Gemini) for audio transcription
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (!LOVABLE_API_KEY) {
-      console.error("LOVABLE_API_KEY not configured");
+    // Use (Gemini) for audio transcription
+    const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
+    if (!GEMINI_API_KEY) {
+      console.error("GEMINI_API_KEY not configured");
       return "[Áudio não reconhecido]";
     }
 
-    const transcriptionRes = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+    const transcriptionRes = await fetch("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
+        Authorization: `Bearer ${GEMINI_API_KEY}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "google/gemini-2.5-flash",
+        model: "gemini-2.5-flash",
         messages: [
           {
             role: "user",
@@ -99,17 +99,17 @@ async function getAIResponse(
   conversationMessages: Array<{ role: string; content: string }>,
   systemPrompt: string
 ): Promise<string> {
-  const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-  if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY not configured");
+  const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
+  if (!GEMINI_API_KEY) throw new Error("GEMINI_API_KEY not configured");
 
-  const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+  const res = await fetch("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${LOVABLE_API_KEY}`,
+      Authorization: `Bearer ${GEMINI_API_KEY}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: "google/gemini-3-flash-preview",
+      model: "gemini-2.5-flash",
       messages: [
         { role: "system", content: systemPrompt },
         ...conversationMessages,
@@ -382,16 +382,16 @@ serve(async (req) => {
           const mediaData = await mediaRes.json();
           if (mediaData.base64) {
             // Transcribe using AI
-            const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-            if (LOVABLE_API_KEY) {
-              const transcriptionRes = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+            const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
+            if (GEMINI_API_KEY) {
+              const transcriptionRes = await fetch("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", {
                 method: "POST",
                 headers: {
-                  Authorization: `Bearer ${LOVABLE_API_KEY}`,
+                  Authorization: `Bearer ${GEMINI_API_KEY}`,
                   "Content-Type": "application/json",
                 },
                 body: JSON.stringify({
-                  model: "google/gemini-2.5-flash",
+                  model: "gemini-2.5-flash",
                   messages: [{
                     role: "user",
                     content: [

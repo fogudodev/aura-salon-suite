@@ -20,53 +20,74 @@ serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY is not configured");
+    const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
+    if (!GEMINI_API_KEY) throw new Error("GEMINI_API_KEY is not configured");
 
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
     const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!
 
     const authHeader = req.headers.get("Authorization");
-    if (!authHeader?.startsWith("Bearer ")) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
+if (!authHeader?.startsWith("Bearer ")) {
+  return new Response(JSON.stringify({ error: "Unauthorized" }), {
+    status: 401,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
+}
 
-    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
-    const token = authHeader.replace("Bearer ", "");
-    
-    // Use getClaims for more reliable auth validation
-    const userClient = createClient(SUPABASE_URL, Deno.env.get("SUPABASE_ANON_KEY")!, {
-      global: { headers: { Authorization: authHeader } },
-    });
+const token = authHeader.replace("Bearer ", "");
 
-    const { data: claimsData, error: claimsError } = await userClient.auth.getClaims(token);
-    if (claimsError || !claimsData?.claims) {
-      console.error("Auth error:", claimsError);
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
+// client do usuário: só para validar token e pegar claims
+const userClient = createClient(
+  SUPABASE_URL,
+  Deno.env.get("SUPABASE_ANON_KEY")!,
+  {
+    global: { headers: { Authorization: authHeader } },
+  }
+);
 
-    const userId = claimsData.claims.sub;
-    const { messages } = await req.json();
+// client admin: só para consultar banco
+const supabaseAdmin = createClient(
+  SUPABASE_URL,
+  Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
+);
 
-    const { data: professional } = await supabase
-      .from("professionals")
-      .select("*")
-      .eq("user_id", userId)
-      .single();
+const { data: claimsData, error: claimsError } = await userClient.auth.getClaims(token);
 
-    if (!professional) {
-      return new Response(JSON.stringify({ error: "Profissional não encontrado" }), {
-        status: 404,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-    const pid = professional.id;
+if (claimsError || !claimsData?.claims) {
+  console.error("Auth error:", claimsError);
+  return new Response(JSON.stringify({ error: "Unauthorized" }), {
+    status: 401,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
+}
+
+const userId = claimsData.claims.sub;
+const { messages } = await req.json();
+
+console.log("USER ID TOKEN:", userId);
+
+const { data: professional, error: professionalError } = await supabaseAdmin
+  .from("professionals")
+  .select("*")
+  .eq("user_id", userId)
+  .single();
+
+console.log("PROFESSIONAL:", professional);
+console.log("PROFESSIONAL ERROR:", professionalError);
+
+if (professionalError) {
+  console.error("Erro ao buscar profissional:", professionalError);
+}
+
+if (!professional) {
+  return new Response(JSON.stringify({ error: "Profissional não encontrado" }), {
+    status: 404,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
+}
+
+const pid = professional.id;
 
     // Fetch ALL business data (no date filter on core tables)
     const [
@@ -83,18 +104,18 @@ serve(async (req) => {
       { data: automations },
       { data: coupons },
     ] = await Promise.all([
-      supabase.from("bookings").select("*").eq("professional_id", pid).order("start_time", { ascending: true }).limit(1000),
-      supabase.from("clients").select("*").eq("professional_id", pid),
-      supabase.from("services").select("*").eq("professional_id", pid),
-      supabase.from("salon_employees").select("*").eq("salon_id", pid),
-      supabase.from("expenses").select("*").eq("professional_id", pid).order("expense_date", { ascending: true }).limit(1000),
-      supabase.from("commissions").select("*").eq("professional_id", pid).order("created_at", { ascending: true }).limit(1000),
-      supabase.from("reviews").select("*").eq("professional_id", pid).order("created_at", { ascending: false }),
-      supabase.from("products").select("*").eq("professional_id", pid),
-      supabase.from("subscriptions").select("*").eq("professional_id", pid).single(),
-      supabase.from("working_hours").select("*").eq("professional_id", pid),
-      supabase.from("whatsapp_automations").select("*").eq("professional_id", pid),
-      supabase.from("coupons").select("*").eq("professional_id", pid),
+      supabaseAdmin.from("bookings").select("*").eq("professional_id", pid).order("start_time", { ascending: true }).limit(1000),
+      supabaseAdmin.from("clients").select("*").eq("professional_id", pid),
+      supabaseAdmin.from("services").select("*").eq("professional_id", pid),
+      supabaseAdmin.from("salon_employees").select("*").eq("salon_id", pid),
+      supabaseAdmin.from("expenses").select("*").eq("professional_id", pid).order("expense_date", { ascending: true }).limit(1000),
+      supabaseAdmin.from("commissions").select("*").eq("professional_id", pid).order("created_at", { ascending: true }).limit(1000),
+      supabaseAdmin.from("reviews").select("*").eq("professional_id", pid).order("created_at", { ascending: false }),
+      supabaseAdmin.from("products").select("*").eq("professional_id", pid),
+      supabaseAdmin.from("subscriptions").select("*").eq("professional_id", pid).single(),
+      supabaseAdmin.from("working_hours").select("*").eq("professional_id", pid),
+      supabaseAdmin.from("whatsapp_automations").select("*").eq("professional_id", pid),
+      supabaseAdmin.from("coupons").select("*").eq("professional_id", pid),
     ]);
 
     const bookings = allBookings || [];
@@ -544,14 +565,14 @@ Você age como uma consultora especialista no mercado de beleza. Analise os dado
 
 ${businessContext}`;
 
-    const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+    const response = await fetch("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
+        Authorization: `Bearer ${GEMINI_API_KEY}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "google/gemini-3-flash-preview",
+        model: "gemini-2.5-flash",
         messages: [
           { role: "system", content: systemPrompt },
           ...messages,

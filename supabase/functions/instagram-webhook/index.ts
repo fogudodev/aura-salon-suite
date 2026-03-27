@@ -152,7 +152,7 @@ async function handleAutoReply(
       .join("\n");
 
     const bookingLink = professional?.slug
-      ? `https://id-preview--cc4b39bf-f545-4ef8-9888-3d9b85278583.lovable.app/${professional.slug}`
+      ? `https://generativelanguage.googleapis.com/v1beta/openai/chat/completions/${professional.slug}`
       : null;
 
     const salonName = professional?.business_name || professional?.name || "nosso salão";
@@ -179,14 +179,14 @@ Regras:
 - Use emojis moderadamente
 - Seja acolhedor(a) e profissional`;
 
-    const aiResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+    const aiResponse = await fetch("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", {
       method: "POST",
       headers: {
         Authorization: `Bearer ${LOVABLE_API_KEY}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "google/gemini-3-flash-preview",
+        model: "gemini-2.5-flash",
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: messageText },
@@ -275,7 +275,7 @@ async function handleCommentKeyword(
 
     const salonName = professional?.business_name || professional?.name || "nosso salão";
     const bookingLink = professional?.slug
-      ? `https://id-preview--cc4b39bf-f545-4ef8-9888-3d9b85278583.lovable.app/${professional.slug}`
+      ? `https://generativelanguage.googleapis.com/v1beta/openai/chat/completions/${professional.slug}`
       : "";
 
     let replyText = matchedKeyword.custom_response;

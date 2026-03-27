@@ -15,8 +15,12 @@ serve(async (req) => {
   try {
     const { name, businessName, email, phone } = await req.json();
 
-    const EVOLUTION_URL = Deno.env.get("EVOLUTION_API_URL") || "";
-    const EVOLUTION_KEY = Deno.env.get("EVOLUTION_API_KEY") || "";
+    const EVOLUTION_URL = (Deno.env.get("EVOLUTION_API_URL") || "").replace(/\/$/, "");
+const EVOLUTION_KEY = Deno.env.get("EVOLUTION_API_KEY") || "";
+
+if (!EVOLUTION_URL) {
+  throw new Error("EVOLUTION_API_URL NÃO CONFIGURADA");
+}
 
     // Find an active admin instance to send from - use "gende_" prefixed instance
     // We'll send directly via Evolution API using a known admin instance
@@ -34,10 +38,12 @@ _Entre em contato para ajudar na configuração!_`;
     // Try to find any connected instance to send from
     const { createClient } = await import("npm:@supabase/supabase-js@2.57.2");
     const supabase = createClient(
-      Deno.env.get("SUPABASE_URL") ?? "",
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
-      { auth: { persistSession: false } }
-    );
+  Deno.env.get("SUPABASE_PUBLIC_URL") ||
+  Deno.env.get("API_EXTERNAL_URL") ||
+  "",
+  Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "",
+  { auth: { persistSession: false } }
+);
 
     const { data: instances } = await supabase
       .from("whatsapp_instances")
