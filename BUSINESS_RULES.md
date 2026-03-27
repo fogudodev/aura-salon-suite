@@ -4,9 +4,10 @@ This document defines the core business logic and automated behaviors of the Aur
 
 ## 1. Professional Onboarding & Public Page
 
-### Automatic Slug Generation [NEW]
+### Automatic Slug Generation [FINALIZED]
 - **Rule**: Every new professional or salon must have a unique public slug at creation time.
-- **Trigger**: A `BEFORE INSERT` trigger on the `professionals` table handles this automatically.
+- **Trigger**: `before_insert_set_slug` (BEFORE INSERT on `professionals`).
+- **Function**: `set_professional_slug()` using `generate_unique_professional_slug()`.
 - **Source**: The slug is primarily derived from `business_name`. If empty, it falls back to `name`.
 - **Normalization**:
   - Lowercase
