@@ -142,7 +142,7 @@ const Settings = () => {
 
 /* ===================== SYSTEM APPEARANCE ===================== */
 const ACCENT_PRESETS = [
-  "#FF0066", "#C4922A", "#E67E22", "#E74C3C", "#9B59B6",
+  "#eebf9c", "#C4922A", "#E67E22", "#E74C3C", "#9B59B6",
   "#3498DB", "#1ABC9C", "#2ECC71", "#F39C12", "#D35400",
   "#8E44AD", "#2980B9",
 ];
@@ -184,7 +184,7 @@ const SystemAppearanceSection = () => {
 
   const [businessName, setBusinessName] = useState("");
   const [logoUrl, setLogoUrl] = useState("");
-  const [accentColor, setAccentColor] = useState("#FF0066");
+  const [accentColor, setAccentColor] = useState("#eebf9c");
   const [sidebarColor, setSidebarColor] = useState("#09090B");
   const [sidebarTextColor, setSidebarTextColor] = useState("#FFFFFF");
 
@@ -192,7 +192,7 @@ const SystemAppearanceSection = () => {
     if (professional) {
       setBusinessName(professional.business_name || professional.name || "");
       setLogoUrl(professional.logo_url || "");
-      setAccentColor(professional.system_accent_color || professional.primary_color || "#FF0066");
+      setAccentColor(professional.system_accent_color || professional.primary_color || "#eebf9c");
       setSidebarColor(professional.system_sidebar_color || "#09090B");
       setSidebarTextColor(professional.system_sidebar_text_color || "#FFFFFF");
     }

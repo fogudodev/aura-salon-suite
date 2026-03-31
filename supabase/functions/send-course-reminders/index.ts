@@ -6,6 +6,22 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+function getEvolutionUrl(): string {
+  const url = Deno.env.get("EVOLUTION_API_URL");
+  if (!url) {
+    throw new Error("EVOLUTION_API_URL not configured");
+  }
+  return url;
+}
+
+function getEvolutionKey(): string {
+  const key = Deno.env.get("EVOLUTION_API_KEY");
+  if (!key) {
+    throw new Error("EVOLUTION_API_KEY not configured");
+  }
+  return key;
+}
+
 function replaceVars(template: string, vars: Record<string, string>): string {
   let result = template;
   for (const [key, value] of Object.entries(vars)) {
@@ -25,8 +41,8 @@ serve(async (req) => {
     { auth: { persistSession: false } }
   );
 
-  const EVOLUTION_URL = Deno.env.get("EVOLUTION_API_URL") || "";
-  const EVOLUTION_KEY = Deno.env.get("EVOLUTION_API_KEY") || "";
+  const EVOLUTION_URL = getEvolutionUrl();
+  const EVOLUTION_KEY = getEvolutionKey();
 
   try {
     const body = await req.json().catch(() => ({}));

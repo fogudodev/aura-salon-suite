@@ -314,7 +314,7 @@ async function checkConversion(supabase: any, professionalId: string, bookingId:
 
       // Increment conversion count
       await supabase.from("upsell_rules")
-        .update({ conversion_count: supabase.raw("conversion_count + 1") })
+        .update({ conversion_count: (rule.conversion_count || 0) + 1 })
         .eq("id", r.upsell_rule_id)
         .catch(() => {});
 
@@ -361,6 +361,48 @@ async function getMetrics(supabase: any, professionalId: string) {
     sent, accepted, totalRevenue, monthlyRevenue, conversionRate,
     recipients: recipients || [],
   });
+}
+
+async function executeRule(
+  supabase: any,
+  professionalId: string,
+  ruleId: string,
+  clientPhone: string,
+  clientName: string,
+  serviceName: string
+) {
+  try {
+    const { data: rule } = await supabase
+      .from("upsell_rules")
+      .select("*, recommended:recommended_service_id(name, price)")
+      .eq("id", ruleId)
+      .single();
+
+    if (!rule) {
+      return jsonResponse({ success: false, error: "Rule not found" });
+    }
+
+    const message = rule.promo_message || `Oi ${clientName || "Cliente"}! Que tal adicionar ${rule.recommended?.name || "este serviço"} no seu horário?`;
+
+    const sent = await sendWhatsApp(supabase, professionalId, clientPhone, message);
+
+    if (sent) {
+      await supabase.from("upsell_events").insert({
+        professional_id: professionalId,
+        source_service_id: null,
+        recommended_service_id: rule.recommended_service_id,
+        client_phone: clientPhone,
+        channel: "whatsapp",
+        status: "accepted",
+        event_type: "converted",
+      });
+    }
+
+    return jsonResponse({ success: sent });
+  } catch (e) {
+    console.error("executeRule error:", e);
+    return jsonResponse({ success: false, error: e.message });
+  }
 }
 
 function jsonResponse(data: any, status = 200) {

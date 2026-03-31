@@ -6,12 +6,26 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
+function getEvolutionUrl(): string {
+  const url = Deno.env.get("EVOLUTION_API_URL");
+  if (!url) {
+    throw new Error("EVOLUTION_API_URL not configured");
+  }
+  return url;
+}
+
+function getEvolutionKey(): string {
+  const key = Deno.env.get("EVOLUTION_API_KEY");
+  if (!key) {
+    throw new Error("EVOLUTION_API_KEY not configured");
+  }
+  return key;
+}
+
 const getEvolutionHeaders = () => ({
   "Content-Type": "application/json",
-  apikey: Deno.env.get("EVOLUTION_API_KEY") || "",
+  apikey: getEvolutionKey(),
 });
-
-const EVOLUTION_URL = () => Deno.env.get("EVOLUTION_API_URL") || "";
 
 function replaceVars(template: string, vars: Record<string, string>): string {
   let result = template;
@@ -65,7 +79,7 @@ serve(async (req) => {
     switch (action) {
       case "create-instance": {
         const { instanceName, professionalId } = params;
-        const res = await fetch(`${EVOLUTION_URL()}/instance/create`, {
+        const res = await fetch(`${getEvolutionUrl()}/instance/create`, {
           method: "POST",
           headers: getEvolutionHeaders(),
           body: JSON.stringify({
@@ -74,6 +88,12 @@ serve(async (req) => {
             qrcode: true,
           }),
         });
+        
+        if (!res.ok) {
+          const errText = await res.text();
+          throw new Error(`Failed to create instance: ${res.status} - ${errText}`);
+        }
+        
         const data = await res.json();
 
         await supabase.from("whatsapp_instances").upsert({
@@ -87,7 +107,7 @@ serve(async (req) => {
         // Auto-configure webhook for the new instance
         const webhookUrl = `${Deno.env.get("SUPABASE_URL")}/functions/v1/whatsapp-webhook`;
         try {
-          await fetch(`${EVOLUTION_URL()}/webhook/set/${instanceName}`, {
+          await fetch(`${getEvolutionUrl()}/webhook/set/${instanceName}`, {
             method: "POST",
             headers: getEvolutionHeaders(),
             body: JSON.stringify({
@@ -115,7 +135,7 @@ serve(async (req) => {
       case "set-webhook": {
         const { instanceName } = params;
         const webhookUrl = `${Deno.env.get("SUPABASE_URL")}/functions/v1/whatsapp-webhook`;
-        const res = await fetch(`${EVOLUTION_URL()}/webhook/set/${instanceName}`, {
+        const res = await fetch(`${getEvolutionUrl()}/webhook/set/${instanceName}`, {
           method: "POST",
           headers: getEvolutionHeaders(),
           body: JSON.stringify({
@@ -138,7 +158,7 @@ serve(async (req) => {
 
       case "get-qrcode": {
         const { instanceName } = params;
-        const res = await fetch(`${EVOLUTION_URL()}/instance/connect/${instanceName}`, {
+        const res = await fetch(`${getEvolutionUrl()}/instance/connect/${instanceName}`, {
           method: "GET",
           headers: getEvolutionHeaders(),
         });
@@ -148,7 +168,7 @@ serve(async (req) => {
 
       case "check-status": {
         const { instanceName } = params;
-        const res = await fetch(`${EVOLUTION_URL()}/instance/connectionState/${instanceName}`, {
+        const res = await fetch(`${getEvolutionUrl()}/instance/connectionState/${instanceName}`, {
           method: "GET",
           headers: getEvolutionHeaders(),
         });
@@ -168,7 +188,7 @@ serve(async (req) => {
       case "send-message": {
         const { instanceName, phone, message } = params;
         const normalizedPhone = normalizePhone(phone);
-        const res = await fetch(`${EVOLUTION_URL()}/message/sendText/${instanceName}`, {
+        const res = await fetch(`${getEvolutionUrl()}/message/sendText/${instanceName}`, {
           method: "POST",
           headers: getEvolutionHeaders(),
           body: JSON.stringify({
@@ -176,13 +196,27 @@ serve(async (req) => {
             text: message,
           }),
         });
-        result = await res.json();
+        
+        let sendResult: any;
+        if (res.ok) {
+          sendResult = await res.json();
+        } else {
+          sendResult = await res.json().catch(() => ({}));
+          if (res.status === 404) {
+            await supabase.from("whatsapp_instances")
+              .update({ status: "disconnected" })
+              .eq("instance_name", instanceName);
+          }
+          result = { success: false, error: `Failed to send message: ${res.status}`, details: sendResult };
+          break;
+        }
 
         if (res.status === 404) {
           await supabase.from("whatsapp_instances")
             .update({ status: "disconnected" })
             .eq("instance_name", instanceName);
         }
+        result = { success: true, data: sendResult };
         break;
       }
 
@@ -266,7 +300,7 @@ serve(async (req) => {
 
         const finalMessage = replaceVars(messageTemplate, templateVars);
 
-        const sendRes = await fetch(`${EVOLUTION_URL()}/message/sendText/${inst.instance_name}`, {
+        const sendRes = await fetch(`${getEvolutionUrl()}/message/sendText/${inst.instance_name}`, {
           method: "POST",
           headers: getEvolutionHeaders(),
           body: JSON.stringify({ number: phone, text: finalMessage }),
@@ -316,7 +350,7 @@ serve(async (req) => {
 
         const msg = `💰 *Nova comissão pendente!*\n\nOlá ${employee.name}! Você tem uma nova comissão:\n\n💇 Valor do serviço: R$ ${Number(bookingAmount).toFixed(2)}\n📊 Percentual: ${percentage}%\n💵 Sua comissão: *R$ ${Number(commissionAmount).toFixed(2)}*\n\nAguarde o repasse pelo gestor. 😊`;
 
-        const sendRes = await fetch(`${EVOLUTION_URL()}/message/sendText/${inst.instance_name}`, {
+        const sendRes = await fetch(`${getEvolutionUrl()}/message/sendText/${inst.instance_name}`, {
           method: "POST",
           headers: getEvolutionHeaders(),
           body: JSON.stringify({ number: normalizedEmpPhone, text: msg }),
@@ -367,7 +401,7 @@ serve(async (req) => {
           const normalizedPaidPhone = normalizePhone(employee.phone);
           const msg = `✅ *Comissão paga!*\n\nOlá ${employee.name}! Suas comissões foram pagas.\n\n💵 Valor total: *R$ ${Number(totalAmount).toFixed(2)}*\n\nObrigado pelo excelente trabalho! 🎉`;
 
-          const sendRes = await fetch(`${EVOLUTION_URL()}/message/sendText/${inst.instance_name}`, {
+          const sendRes = await fetch(`${getEvolutionUrl()}/message/sendText/${inst.instance_name}`, {
             method: "POST",
             headers: getEvolutionHeaders(),
             body: JSON.stringify({ number: normalizedPaidPhone, text: msg }),

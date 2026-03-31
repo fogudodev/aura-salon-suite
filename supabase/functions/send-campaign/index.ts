@@ -6,6 +6,22 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
+function getEvolutionUrl(): string {
+  const url = Deno.env.get("EVOLUTION_API_URL");
+  if (!url) {
+    throw new Error("EVOLUTION_API_URL not configured");
+  }
+  return url;
+}
+
+function getEvolutionKey(): string {
+  const key = Deno.env.get("EVOLUTION_API_KEY");
+  if (!key) {
+    throw new Error("EVOLUTION_API_KEY not configured");
+  }
+  return key;
+}
+
 function replaceVars(template: string, vars: Record<string, string>): string {
   let result = template;
   for (const [key, value] of Object.entries(vars)) {
@@ -25,8 +41,8 @@ serve(async (req) => {
     { auth: { persistSession: false } }
   );
 
-  const EVOLUTION_URL = Deno.env.get("EVOLUTION_API_URL") || "";
-  const EVOLUTION_KEY = Deno.env.get("EVOLUTION_API_KEY") || "";
+  const EVOLUTION_URL = getEvolutionUrl();
+  const EVOLUTION_KEY = getEvolutionKey();
 
   try {
     // Auth check using getClaims
@@ -206,6 +222,15 @@ serve(async (req) => {
         let failedCount = 0;
 
         for (const contact of contacts) {
+          if (!contact.phone || contact.phone.trim() === "") {
+            failedCount++;
+            await supabaseAdmin.from("campaign_contacts")
+              .update({ status: "failed", error_message: "Phone not found" })
+              .eq("campaign_id", campaign.id)
+              .eq("phone", contact.phone);
+            continue;
+          }
+
           const finalMessage = replaceVars(message, {
             nome: contact.client_name || "Cliente",
             link: prof?.slug ? `https://gende.io/${prof.slug}` : "",

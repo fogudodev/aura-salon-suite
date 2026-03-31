@@ -9,10 +9,13 @@ export const useWhatsAppInstance = () => {
   return useQuery({
     queryKey: ["whatsapp-instance", professional?.id],
     queryFn: async () => {
+      if (!professional?.id) {
+        throw new Error("Professional ID not available");
+      }
       const { data, error } = await api
         .from("whatsapp_instances")
         .select("*")
-        .eq("professional_id", professional!.id)
+        .eq("professional_id", professional.id)
         .maybeSingle();
       if (error) throw error;
       return data;
@@ -27,10 +30,13 @@ export const useWhatsAppAutomations = () => {
   return useQuery({
     queryKey: ["whatsapp-automations", professional?.id],
     queryFn: async () => {
+      if (!professional?.id) {
+        throw new Error("Professional ID not available");
+      }
       const { data, error } = await api
         .from("whatsapp_automations")
         .select("*")
-        .eq("professional_id", professional!.id);
+        .eq("professional_id", professional.id);
       if (error) throw error;
       return data;
     },
@@ -59,10 +65,13 @@ export const useWhatsAppLogs = (limit = 50) => {
   return useQuery({
     queryKey: ["whatsapp-logs", professional?.id, limit],
     queryFn: async () => {
+      if (!professional?.id) {
+        throw new Error("Professional ID not available");
+      }
       const { data, error } = await api
         .from("whatsapp_logs")
         .select("*")
-        .eq("professional_id", professional!.id)
+        .eq("professional_id", professional.id)
         .order("created_at", { ascending: false })
         .limit(limit);
       if (error) throw error;

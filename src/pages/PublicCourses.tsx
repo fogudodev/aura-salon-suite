@@ -131,7 +131,7 @@ const PublicCourses = () => {
     );
   }
 
-  const primaryColor = professional.primary_color || "hsl(336, 100%, 50%)";
+  const primaryColor = professional.primary_color || "#eebf9c";
 
   return (
     <div className="min-h-screen bg-background">

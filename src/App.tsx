@@ -35,6 +35,10 @@ import Waitlist from "./pages/Waitlist";
 import ServicePackages from "./pages/ServicePackages";
 import NotFound from "./pages/NotFound";
 import Landing from "./pages/Landing";
+import Pricing from "./pages/Pricing";
+import Features from "./pages/Features";
+import Support from "./pages/Support";
+import FeatureDetail from "./pages/FeatureDetail";
 import Instructions from "./pages/Instructions";
 import UpsellConfig from "./pages/UpsellConfig";
 import UpsellDashboard from "./pages/UpsellDashboard";
@@ -87,6 +91,10 @@ const AppContent = () => (
           <Routes>
             <Route path="/auth" element={<Auth />} />
             <Route path="/landing" element={<Landing />} />
+            <Route path="/pricing" element={<Pricing />} />
+            <Route path="/features" element={<Features />} />
+            <Route path="/support" element={<Support />} />
+            <Route path="/features/:slug" element={<FeatureDetail />} />
             
             {/* Professional routes */}
             <Route path="/" element={<ProtectedRoute><Index /></ProtectedRoute>} />

@@ -109,18 +109,14 @@ const Auth = () => {
     }).catch((err) => console.error("Notify signup error:", err));
   };
 
-  const inputClass = "bg-card border-border text-foreground placeholder:text-muted-foreground rounded-full py-3 px-6 text-base h-auto focus:border-accent focus:ring-accent transition-all duration-300 hover:bg-secondary";
+  const inputClass = "bg-white border-[#e8dcc8] text-[#3d2c1e] placeholder:text-[#6b5a4a] rounded-full py-3 px-6 text-base h-auto focus:border-[#eebf9c] focus:ring-[#eebf9c] transition-all duration-300";
 
   return (
-    <div className="min-h-screen bg-background text-foreground flex flex-col relative overflow-hidden">
+    <div className="min-h-screen bg-[#fdf8f3] text-[#3d2c1e] flex flex-col relative overflow-hidden">
       {/* Wavy SVG Divider */}
       <div className="absolute top-0 left-0 w-full pointer-events-none">
         <svg viewBox="0 0 1440 400" preserveAspectRatio="none" fill="none" xmlns="http://www.w3.org/2000/svg" className="w-full h-[45vh] block">
-          <path
-            d="M0,400 L0,0 L1440,0 L1440,400 C1300,320 1100,380 800,300 C500,220 200,340 0,400 Z"
-            fill="hsl(336, 100%, 50%)"
-            fillOpacity="0.08"
-          />
+          <path d="M0,400 L0,0 L1440,0 L1440,400 C1300,320 1100,380 800,300 C500,220 200,340 0,400 Z" fill="#eebf9c" fillOpacity="0.15" />
         </svg>
       </div>
 
@@ -142,7 +138,7 @@ const Auth = () => {
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.9, y: 20 }}
               transition={{ type: "spring", duration: 0.5 }}
-              className="bg-card border border-border rounded-3xl p-6 sm:p-8 max-w-sm w-full shadow-2xl relative"
+              className="bg-white border border-[#e8dcc8] rounded-3xl p-6 sm:p-8 max-w-sm w-full shadow-2xl relative"
               onClick={(e) => e.stopPropagation()}
             >
               <button
@@ -150,7 +146,7 @@ const Auth = () => {
                   setShowSuccessModal(false);
                   setMode("login");
                 }}
-                className="absolute top-4 right-4 text-muted-foreground hover:text-foreground transition-colors"
+                className="absolute top-4 right-4 text-[#6b5a4a] hover:text-[#3d2c1e] transition-colors"
               >
                 <X size={20} />
               </button>
@@ -164,12 +160,12 @@ const Auth = () => {
                   Conta criada com sucesso! 🎉
                 </h2>
 
-                <p className="text-muted-foreground text-sm sm:text-base leading-relaxed mb-2">
+                <p className="text-[#6b5a4a] text-sm sm:text-base leading-relaxed mb-2">
                   Verifique seu email para confirmar sua conta.
                 </p>
 
-                <div className="bg-accent/10 border border-accent/20 rounded-2xl p-4 mt-3 w-full">
-                  <p className="text-sm font-medium text-foreground">
+                <div className="bg-[#eebf9c]/10 border border-[#eebf9c]/20 rounded-2xl p-4 mt-3 w-full">
+                  <p className="text-sm font-medium text-[#3d2c1e]">
                     📱 Em instantes, um analista entrará em contato pelo seu WhatsApp para ajudar na configuração do seu espaço.
                   </p>
                 </div>
@@ -179,7 +175,7 @@ const Auth = () => {
                     setShowSuccessModal(false);
                     setMode("login");
                   }}
-                  className="w-full rounded-full py-3 h-auto text-base font-semibold bg-accent text-accent-foreground hover:bg-accent/90 mt-6 border border-foreground/20"
+                  className="w-full rounded-full py-3 h-auto text-base font-semibold bg-[#eebf9c] text-[#3d2c1e] hover:bg-[#d4a84b] mt-6 border border-[#e8dcc8]"
                 >
                   Entendido!
                 </Button>
@@ -208,7 +204,7 @@ const Auth = () => {
 
               <form onSubmit={handleLogin} className="space-y-6">
                 <div className="space-y-2">
-                  <Label className="text-muted-foreground text-sm pl-2">Email</Label>
+                  <Label className="text-[#6b5a4a] text-sm pl-2">Email</Label>
                   <Input
                     type="email"
                     value={email}
@@ -220,7 +216,7 @@ const Auth = () => {
                 </div>
 
                 <div className="space-y-2">
-                  <Label className="text-muted-foreground text-sm pl-2">Senha</Label>
+                  <Label className="text-[#6b5a4a] text-sm pl-2">Senha</Label>
                   <div className="relative">
                     <Input
                       type={showPassword ? "text" : "password"}
@@ -234,7 +230,7 @@ const Auth = () => {
                     <button
                       type="button"
                       onClick={() => setShowPassword(!showPassword)}
-                      className="absolute right-5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                      className="absolute right-5 top-1/2 -translate-y-1/2 text-[#6b5a4a] hover:text-[#3d2c1e] transition-colors"
                     >
                       {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
                     </button>
@@ -244,10 +240,10 @@ const Auth = () => {
                 <Button
                   type="submit"
                   disabled={loading}
-                  className="w-full rounded-full py-3 md:py-4 h-auto text-base md:text-lg font-semibold bg-accent text-accent-foreground hover:bg-accent/90 transition-all duration-300 mt-4 border border-foreground/20"
+                  className="w-full rounded-full py-3 md:py-4 h-auto text-base md:text-lg font-semibold bg-[#eebf9c] text-[#3d2c1e] hover:bg-[#d4a84b] transition-all duration-300 mt-4 border border-[#e8dcc8]"
                 >
                   {loading ? (
-                    <div className="w-5 h-5 border-2 border-accent-foreground/30 border-t-accent-foreground rounded-full animate-spin" />
+                    <div className="w-5 h-5 border-2 border-[#3d2c1e]/30 border-t-[#3d2c1e] rounded-full animate-spin" />
                   ) : (
                     <>
                       <ArrowRight size={18} />
@@ -257,11 +253,11 @@ const Auth = () => {
                 </Button>
               </form>
 
-              <p className="text-center text-muted-foreground mt-8 text-sm">
+              <p className="text-center text-[#6b5a4a] mt-8 text-sm">
                 Ainda não tem conta?{" "}
                 <button
                   onClick={() => setMode("signup")}
-                  className="text-accent hover:underline font-medium"
+                  className="text-[#d4a84b] hover:underline font-medium"
                 >
                   Criar conta
                 </button>
@@ -283,13 +279,13 @@ const Auth = () => {
               </div>
 
               <h1 className="text-2xl md:text-3xl font-bold tracking-tight mb-1">Criar sua conta</h1>
-              <p className="text-sm text-muted-foreground mb-6">
+              <p className="text-sm text-[#6b5a4a] mb-6">
                 Preencha seus dados e comece a organizar seu negócio.
               </p>
 
               <form onSubmit={handleSignup} className="space-y-4">
                 <div className="space-y-2">
-                  <Label className="text-muted-foreground text-sm pl-2">Nome completo</Label>
+                  <Label className="text-[#6b5a4a] text-sm pl-2">Nome completo</Label>
                   <Input
                     type="text"
                     value={name}
@@ -301,7 +297,7 @@ const Auth = () => {
                 </div>
 
                 <div className="space-y-2">
-                  <Label className="text-muted-foreground text-sm pl-2">Nome do Studio ou Salão</Label>
+                  <Label className="text-[#6b5a4a] text-sm pl-2">Nome do Studio ou Salão</Label>
                   <Input
                     type="text"
                     value={businessName}
@@ -314,15 +310,15 @@ const Auth = () => {
 
                 {/* Account type selection */}
                 <div className="space-y-2">
-                  <Label className="text-muted-foreground text-sm pl-2">Como você trabalha?</Label>
+                  <Label className="text-[#6b5a4a] text-sm pl-2">Como você trabalha?</Label>
                   <div className="flex gap-2">
                     <button
                       type="button"
                       onClick={() => { setAccountType("autonomous"); setEmployeeCount(1); }}
                       className={`flex-1 rounded-full py-2.5 px-4 text-sm font-medium border transition-all duration-200 ${
                         accountType === "autonomous"
-                          ? "bg-accent text-accent-foreground border-accent"
-                          : "bg-card border-border text-muted-foreground hover:bg-secondary"
+                          ? "bg-[#eebf9c] text-[#3d2c1e] border-[#eebf9c]"
+                          : "bg-white border-[#e8dcc8] text-[#6b5a4a] hover:bg-[#f5dcc3]"
                       }`}
                     >
                       👩‍💼 Trabalho sozinha
@@ -332,8 +328,8 @@ const Auth = () => {
                       onClick={() => setAccountType("salon")}
                       className={`flex-1 rounded-full py-2.5 px-4 text-sm font-medium border transition-all duration-200 ${
                         accountType === "salon"
-                          ? "bg-accent text-accent-foreground border-accent"
-                          : "bg-card border-border text-muted-foreground hover:bg-secondary"
+                          ? "bg-[#eebf9c] text-[#3d2c1e] border-[#eebf9c]"
+                          : "bg-white border-[#e8dcc8] text-[#6b5a4a] hover:bg-[#f5dcc3]"
                       }`}
                     >
                       💇‍♀️ Salão / Equipe
@@ -343,7 +339,7 @@ const Auth = () => {
 
                 {accountType === "salon" && (
                   <div className="space-y-2">
-                    <Label className="text-muted-foreground text-sm pl-2">Quantos profissionais trabalham com você?</Label>
+                    <Label className="text-[#6b5a4a] text-sm pl-2">Quantos profissionais trabalham com você?</Label>
                     <div className="flex items-center gap-3">
                       <Input
                         type="number"
@@ -353,13 +349,13 @@ const Auth = () => {
                         onChange={(e) => setEmployeeCount(Math.max(1, Math.min(50, Number(e.target.value))))}
                         className={`${inputClass} w-24 text-center`}
                       />
-                      <span className="text-sm text-muted-foreground">cadeira(s) / profissional(is)</span>
+                      <span className="text-sm text-[#6b5a4a]">cadeira(s) / profissional(is)</span>
                     </div>
                   </div>
                 )}
 
                 <div className="space-y-2">
-                  <Label className="text-muted-foreground text-sm pl-2">Email</Label>
+                  <Label className="text-[#6b5a4a] text-sm pl-2">Email</Label>
                   <Input
                     type="email"
                     value={email}
@@ -371,9 +367,9 @@ const Auth = () => {
                 </div>
 
                 <div className="space-y-2">
-                  <Label className="text-muted-foreground text-sm pl-2">WhatsApp</Label>
+                  <Label className="text-[#6b5a4a] text-sm pl-2">WhatsApp</Label>
                   <div className="relative">
-                    <div className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground">
+                    <div className="absolute left-4 top-1/2 -translate-y-1/2 text-[#6b5a4a]">
                       <Phone size={16} />
                     </div>
                     <Input
@@ -385,13 +381,13 @@ const Auth = () => {
                       className={`${inputClass} pl-10`}
                     />
                   </div>
-                  <p className="text-[11px] text-muted-foreground pl-2">
+                  <p className="text-[11px] text-[#6b5a4a] pl-2">
                     O DDI 55 é adicionado automaticamente. Enviaremos uma mensagem de boas-vindas!
                   </p>
                 </div>
 
                 <div className="space-y-2">
-                  <Label className="text-muted-foreground text-sm pl-2">Senha</Label>
+                  <Label className="text-[#6b5a4a] text-sm pl-2">Senha</Label>
                   <div className="relative">
                     <Input
                       type={showPassword ? "text" : "password"}
@@ -405,7 +401,7 @@ const Auth = () => {
                     <button
                       type="button"
                       onClick={() => setShowPassword(!showPassword)}
-                      className="absolute right-5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                      className="absolute right-5 top-1/2 -translate-y-1/2 text-[#6b5a4a] hover:text-[#3d2c1e] transition-colors"
                     >
                       {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
                     </button>
@@ -415,10 +411,10 @@ const Auth = () => {
                 <Button
                   type="submit"
                   disabled={loading}
-                  className="w-full rounded-full py-3 h-auto text-base font-semibold bg-accent text-accent-foreground hover:bg-accent/90 transition-all duration-300 mt-2 border border-foreground/20"
+                  className="w-full rounded-full py-3 h-auto text-base font-semibold bg-[#eebf9c] text-[#3d2c1e] hover:bg-[#d4a84b] transition-all duration-300 mt-2 border border-[#e8dcc8]"
                 >
                   {loading ? (
-                    <div className="w-5 h-5 border-2 border-accent-foreground/30 border-t-accent-foreground rounded-full animate-spin" />
+                    <div className="w-5 h-5 border-2 border-[#3d2c1e]/30 border-t-[#3d2c1e] rounded-full animate-spin" />
                   ) : (
                     <>
                       <ArrowRight size={18} />
@@ -428,11 +424,11 @@ const Auth = () => {
                 </Button>
               </form>
 
-              <p className="text-center text-muted-foreground mt-6 text-sm">
+              <p className="text-center text-[#6b5a4a] mt-6 text-sm">
                 Já tem conta?{" "}
                 <button
                   onClick={() => setMode("login")}
-                  className="text-accent hover:underline font-medium"
+                  className="text-[#d4a84b] hover:underline font-medium"
                 >
                   Fazer login
                 </button>

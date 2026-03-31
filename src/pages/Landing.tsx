@@ -1,25 +1,38 @@
-import { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion, useInView, useScroll, useTransform } from "framer-motion";
 import {
   Calendar, Bell, CreditCard, BarChart3, Users, DollarSign,
-  X, ChevronRight, Star, Check, Gift, Shield, ArrowRight,
-  Sparkles, Clock, TrendingUp, MessageCircle, Zap, ChevronDown
+  X, Star, Check, Gift, Shield, ArrowRight, Zap, ChevronDown,
+  Clock, TrendingUp, MessageCircle, Package, UsersRound, Percent,
+  Camera, Mail, MapPin, Video, Headphones, Settings, FileText,
+  BarChart, PieChart, Wallet, ShoppingCart, Award, Megaphone,
+  RefreshCw, StarHalf, Instagram, Cloud, Sparkles, ChevronRight
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import logo from "@/assets/logo-circle.png";
-import logoDark from "@/assets/logo-dark.png";
 
-// ─── Scroll-triggered animation wrapper ───
+const COLORS = {
+  primary: "#eebf9c",
+  primaryDark: "#d4a84b",
+  primaryLight: "#f5dcc3",
+  background: "#fdf8f3",
+  backgroundAlt: "#faf3e8",
+  text: "#3d2c1e",
+  textLight: "#6b5a4a",
+  cardBg: "#ffffff",
+  border: "#e8dcc8",
+};
+
 const FadeInSection = ({ children, className = "", delay = 0 }: { children: React.ReactNode; className?: string; delay?: number }) => {
   const ref = useRef(null);
   const isInView = useInView(ref, { once: true, margin: "-40px" });
   return (
     <motion.div
       ref={ref}
-      initial={{ opacity: 0, y: 30 }}
+      initial={{ opacity: 0, y: 20 }}
       animate={isInView ? { opacity: 1, y: 0 } : {}}
-      transition={{ duration: 0.6, delay, ease: [0.22, 1, 0.36, 1] }}
+      transition={{ duration: 0.5, delay, ease: [0.22, 1, 0.36, 1] }}
       className={className}
     >
       {children}
@@ -27,34 +40,51 @@ const FadeInSection = ({ children, className = "", delay = 0 }: { children: Reac
   );
 };
 
-// ─── FAQ Accordion Item ───
 const FaqItem = ({ question, answer }: { question: string; answer: string }) => {
   const [open, setOpen] = useState(false);
   return (
-    <button
-      onClick={() => setOpen(!open)}
-      className="w-full text-left bg-card border border-border rounded-2xl px-5 py-4 transition-all duration-300 hover:border-accent/40 group"
-    >
-      <div className="flex items-center justify-between gap-3">
-        <span className="font-semibold text-sm sm:text-base">{question}</span>
+    <div className="bg-white rounded-2xl border border-[#e8dcc8] overflow-hidden">
+      <button
+        onClick={() => setOpen(!open)}
+        className="w-full text-left px-5 py-4 flex items-center justify-between gap-3"
+      >
+        <span className="font-semibold text-[#3d2c1e] text-sm sm:text-base">{question}</span>
         <ChevronDown
           size={18}
-          className={`shrink-0 text-muted-foreground transition-transform duration-300 ${open ? "rotate-180" : ""}`}
+          className={`text-[#6b5a4a] transition-transform duration-300 ${open ? "rotate-180" : ""}`}
         />
-      </div>
-      <motion.div
-        initial={false}
-        animate={{ height: open ? "auto" : 0, opacity: open ? 1 : 0 }}
-        transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
-        className="overflow-hidden"
-      >
-        <p className="text-sm text-muted-foreground pt-3 leading-relaxed">{answer}</p>
-      </motion.div>
-    </button>
+      </button>
+      {open && (
+        <div className="px-5 pb-4 text-[#6b5a4a] text-sm sm:text-base leading-relaxed">
+          {answer}
+        </div>
+      )}
+    </div>
   );
 };
 
-// ─── Animated counter ───
+const FeatureCard = ({ icon: Icon, title, desc, link, delay }: { icon: any; title: string; desc: string; link: string; delay: number }) => {
+  const navigate = useNavigate();
+  return (
+    <FadeInSection delay={delay}>
+      <button
+        onClick={() => navigate(link)}
+        className="w-full text-left bg-white rounded-2xl p-5 sm:p-6 border border-[#e8dcc8] hover:border-[#eebf9c] hover:shadow-lg transition-all group"
+      >
+        <div className="w-12 h-12 rounded-xl bg-[#f5dcc3] flex items-center justify-center mb-4 group-hover:bg-[#eebf9c] transition-colors">
+          <Icon className="w-6 h-6 text-[#d4a84b]" />
+        </div>
+        <h3 className="font-bold text-[#3d2c1e] mb-2 text-sm sm:text-base">{title}</h3>
+        <p className="text-[#6b5a4a] text-xs sm:text-sm leading-relaxed line-clamp-2">{desc}</p>
+        <div className="flex items-center gap-1 text-[#d4a84b] text-xs font-medium mt-3 opacity-0 group-hover:opacity-100 transition-opacity">
+          <span>Ver detalhes</span>
+          <ChevronRight size={14} />
+        </div>
+      </button>
+    </FadeInSection>
+  );
+};
+
 const AnimatedCounter = ({ target, prefix = "", suffix = "" }: { target: number; prefix?: string; suffix?: string }) => {
   const ref = useRef(null);
   const isInView = useInView(ref, { once: true });
@@ -76,338 +106,275 @@ const AnimatedCounter = ({ target, prefix = "", suffix = "" }: { target: number;
   return <span ref={ref}>{prefix}{count.toLocaleString("pt-BR")}{suffix}</span>;
 };
 
-// ─── Countdown timer ───
-const CountdownTimer = () => {
-  const [time, setTime] = useState({ h: 23, m: 59, s: 59 });
-  useEffect(() => {
-    const t = setInterval(() => {
-      setTime(prev => {
-        let { h, m, s } = prev;
-        s--;
-        if (s < 0) { s = 59; m--; }
-        if (m < 0) { m = 59; h--; }
-        if (h < 0) { h = 23; m = 59; s = 59; }
-        return { h, m, s };
-      });
-    }, 1000);
-    return () => clearInterval(t);
-  }, []);
-  const pad = (n: number) => n.toString().padStart(2, "0");
-  return (
-    <div className="flex gap-2.5 justify-center">
-      {[
-        { label: "Horas", val: time.h },
-        { label: "Min", val: time.m },
-        { label: "Seg", val: time.s },
-      ].map(({ label, val }) => (
-        <div key={label} className="flex flex-col items-center">
-          <div className="w-14 h-14 sm:w-20 sm:h-20 rounded-xl sm:rounded-2xl bg-card/80 backdrop-blur-xl border border-primary/20 flex items-center justify-center text-xl sm:text-3xl font-bold text-foreground shadow-lg">
-            {pad(val)}
-          </div>
-          <span className="text-[10px] sm:text-xs text-muted-foreground mt-1">{label}</span>
-        </div>
-      ))}
-    </div>
-  );
-};
-
-// ─── Floating shapes background ───
-const FloatingShapes = () => (
-  <div className="absolute inset-0 overflow-hidden pointer-events-none">
-    {[...Array(4)].map((_, i) => (
-      <motion.div
-        key={i}
-        className="absolute rounded-full opacity-[0.04]"
-        style={{
-          width: 150 + i * 80,
-          height: 150 + i * 80,
-          background: `radial-gradient(circle, hsl(var(--primary)), transparent)`,
-          top: `${10 + i * 20}%`,
-          left: `${-10 + i * 25}%`,
-        }}
-        animate={{ y: [0, -20, 0], x: [0, 10, 0] }}
-        transition={{ duration: 8 + i * 2, repeat: Infinity, ease: "easeInOut" }}
-      />
-    ))}
-  </div>
-);
-
 const Landing = () => {
   const navigate = useNavigate();
   const [billingCycle, setBillingCycle] = useState<"monthly" | "annual">("monthly");
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const { scrollYProgress } = useScroll();
   const heroOpacity = useTransform(scrollYProgress, [0, 0.15], [1, 0]);
-  const heroScale = useTransform(scrollYProgress, [0, 0.15], [1, 0.95]);
 
-  const goToSignup = () => navigate("/auth?mode=signup");
+  const goToSignup = () => {
+    navigate("/auth?mode=signup");
+    setMobileMenuOpen(false);
+  };
 
-  const features = [
-    { icon: Calendar, title: "Agenda online 24h", desc: "Seus clientes agendam a qualquer momento, sem precisar ligar." },
-    { icon: Bell, title: "Lembretes automáticos", desc: "Reduza faltas em até 60% com alertas por WhatsApp." },
-    { icon: CreditCard, title: "Pagamentos integrados", desc: "PIX, cartão e dinheiro — tudo registrado automaticamente." },
-    { icon: BarChart3, title: "Relatórios inteligentes", desc: "Saiba exatamente quanto entra e sai do seu negócio." },
-    { icon: Users, title: "Gestão de clientes", desc: "Histórico completo, preferências e comunicação centralizada." },
-    { icon: DollarSign, title: "Controle financeiro", desc: "Despesas, receitas, comissões e lucro em um só lugar." },
+  const navTo = (path: string) => {
+    navigate(path);
+    setMobileMenuOpen(false);
+  };
+
+  const allFeatures = [
+    { icon: Calendar, title: "Agenda Online", desc: "Agendamento 24/7 disponível para seus clientes", link: "/features/agenda" },
+    { icon: Bell, title: "Lembretes Automáticos", desc: "Reduza faltas com notificações via WhatsApp", link: "/features/lembretes" },
+    { icon: CreditCard, title: "Pagamentos", desc: "PIX, cartão e dinheiro integrados", link: "/features/pagamentos" },
+    { icon: BarChart3, title: "Relatórios", desc: "Dashboards e análises detalhadas", link: "/features/relatorios" },
+    { icon: Users, title: "Gestão de Clientes", desc: "Histórico completo e segmentação", link: "/features/clientes" },
+    { icon: DollarSign, title: "Financeiro", desc: "Controle de receitas, despesas e lucro", link: "/features/financeiro" },
+    { icon: UsersRound, title: "Equipe", desc: "Gerencie profissionais e comissões", link: "/features/equipe" },
+    { icon: Package, title: "Produtos", desc: "Controle de estoque e vendas", link: "/features/produtos" },
+    { icon: Percent, title: "Cupons", desc: "Crie promoções e descuentos", link: "/features/cupons" },
+    { icon: Gift, title: "Programa Fidelidade", desc: "Pontos, cashback e recompensas", link: "/features/fidelidade" },
+    { icon: Megaphone, title: "Campanhas", desc: "Marketing via WhatsApp em massa", link: "/features/campanhas" },
+    { icon: Zap, title: "Upsell", desc: "Sugestões de serviços complementares", link: "/features/upsell" },
+    { icon: RefreshCw, title: "Reativação", desc: "Recupere clientes inativos", link: "/features/reativacao" },
+    { icon: StarHalf, title: "Avaliações", desc: "Colete feedbacks dos clientes", link: "/features/avaliacoes" },
+    { icon: Instagram, title: "Instagram", desc: "Automação e mensagens directas", link: "/features/instagram" },
+    { icon: Cloud, title: "Google Calendar", desc: "Sincronização automática", link: "/features/google-calendar" },
+    { icon: Package, title: "Pacotes", desc: "Venda pacotes de serviços", link: "/features/pacotes" },
+    { icon: Camera, title: "Página Pública", desc: "Sua agenda online personalizada", link: "/features/pagina-publica" },
+    { icon: FileText, title: "Lista de Espera", desc: "Gerencie demanda de horários", link: "/features/lista-espera" },
+    { icon: Sparkles, title: "Assistente IA", desc: "Automação inteligente com IA", link: "/features/assistente-ia" },
   ];
 
   const testimonials = [
-    { name: "Carla M.", role: "Cabeleireira", text: "Aumentei 38% do faturamento em 2 meses. Nunca imaginei que organização faria tanta diferença.", stars: 5 },
-    { name: "Rafael S.", role: "Barbeiro", text: "Reduzi faltas em quase 60%. Os lembretes automáticos mudaram meu negócio completamente.", stars: 5 },
-    { name: "Ana P.", role: "Dona de salão", text: "Hoje tenho previsibilidade do meu mês inteiro. Sei exatamente quanto vou faturar.", stars: 5 },
+    { name: "Carla M.", role: "Cabeleireira", text: "Aumentei 38% do faturamento em 2 meses.", stars: 5 },
+    { name: "Rafael S.", role: "Barbeiro", text: "Reduzi faltas em quase 60%. Os lembretes mudaram meu negócio.", stars: 5 },
+    { name: "Ana P.", role: "Dona de salão", text: "Hoje tenho previsibilidade do meu mês inteiro.", stars: 5 },
   ];
 
-  const enemies = [
-    "Cancelamentos sem aviso",
-    "Horários vazios",
-    "Clientes que não voltam",
-    "Falta de previsibilidade financeira",
-    "Dependência total do WhatsApp",
+  const plans = [
+    {
+      name: "Essencial",
+      desc: "Perfeito para autônomos",
+      price: billingCycle === "monthly" ? "49,90" : "41,66",
+      priceLabel: "/mês",
+      annualLabel: billingCycle === "annual" ? "R$ 499/ano" : "",
+      features: [
+        "Agendamentos ilimitados",
+        "Serviços ilimitados",
+        "Clientes ilimitados",
+        "WhatsApp automático",
+        "Relatórios completos",
+        "Página pública",
+        "Suporte prioritário",
+      ],
+      cta: "Assinar agora",
+      popular: true,
+    },
+    {
+      name: "Enterprise",
+      desc: "Para salões com equipe",
+      price: billingCycle === "monthly" ? "99,90" : "83,25",
+      priceLabel: "/mês",
+      annualLabel: billingCycle === "annual" ? "R$ 999/ano" : "",
+      features: [
+        "Tudo do Essencial",
+        "5 profissionais",
+        "Comissões automatizadas",
+        "Google Calendar",
+        "Programa de fidelidade",
+        "Campanhas ilimitadas",
+        "Assistente IA",
+        "Suporte VIP 24/7",
+      ],
+      cta: "Assinar agora",
+      popular: false,
+    },
   ];
 
-  const bonuses = [
-    { title: "Modelo de mensagens automáticas prontas", desc: "Templates testados para confirmação, lembrete e pós-atendimento." },
-    { title: "Planilha estratégica de precificação", desc: "Descubra o preço ideal para cada serviço e maximize seu lucro." },
-    { title: "Mini treinamento: Como lotar sua agenda", desc: "Estratégias práticas para preencher horários vazios rapidamente." },
-    { title: "Checklist de organização financeira", desc: "O passo a passo para ter controle total do seu dinheiro." },
+  const faqs = [
+    { q: "Como funciona o teste grátis?", a: "Você cria sua conta e tem 30 dias para testar todos os recursos. Após esse período, escolha seu plano." },
+    { q: "Quais formas de pagamento?", a: "Aceitamos PIX, cartão de crédito (parcelado) e Boleto. O plano anual tem 20% de desconto." },
+    { q: "Posso cancelar a qualquer momento?", a: "Sim! Cancelamento sem multas ou burocracias. Você continua tendo acesso até o fim do período pago." },
+    { q: "Funciona no celular?", a: "Sim! O Gende funciona perfeitamente em qualquer dispositivo - celular, tablet ou computador." },
+    { q: "Meus clientes precisam baixar app?", a: "Não! Seus clientes agendam direto pela sua página pública, pelo WhatsApp ou Instagram." },
+    { q: "Como funciona o WhatsApp automático?", a: "Conecte sua instância e o sistema envia confirmações, lembretes e follow-ups automaticamente." },
   ];
 
   return (
-    <div className="min-h-screen bg-background text-foreground overflow-x-hidden">
-      <FloatingShapes />
-
-      {/* ══════════ NAVBAR ══════════ */}
-      <nav className="fixed top-0 w-full z-50 bg-background/70 backdrop-blur-2xl border-b border-border/40">
-        <div className="max-w-7xl mx-auto flex items-center justify-between px-4 h-14 sm:h-16">
+    <div className="min-h-screen bg-[#fdf8f3] text-[#3d2c1e] overflow-x-hidden">
+      {/* Navbar */}
+      <nav className="fixed top-0 w-full z-50 bg-white/95 backdrop-blur-md border-b border-[#e8dcc8]">
+        <div className="max-w-6xl mx-auto flex items-center justify-between px-4 h-14">
           <div className="flex items-center gap-2">
-            <img src={logo} alt="Logo" className="w-8 h-8 rounded-xl" />
-            <span className="font-display font-bold text-base hidden sm:block">Gende</span>
+            <button onClick={() => setMobileMenuOpen(!mobileMenuOpen)} className="sm:hidden p-2 -ml-2">
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                {mobileMenuOpen ? (
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                ) : (
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                )}
+              </svg>
+            </button>
+            <button onClick={() => navigate("/")} className="flex items-center gap-2">
+              <img src={logo} alt="Logo" className="w-8 h-8 rounded-xl" />
+              <span className="font-bold text-base text-[#3d2c1e]">Gende</span>
+            </button>
           </div>
-          <div className="flex items-center gap-2">
-            <Button variant="ghost" size="sm" onClick={() => navigate("/auth")} className="text-xs sm:text-sm px-3">
+          
+          {/* Desktop Menu */}
+          <div className="hidden sm:flex items-center gap-2">
+            <button onClick={() => navTo("/pricing")} className="px-3 py-1.5 text-sm text-[#6b5a4a] hover:text-[#3d2c1e] font-medium">
+              Preços
+            </button>
+            <button onClick={() => navTo("/features")} className="px-3 py-1.5 text-sm text-[#6b5a4a] hover:text-[#3d2c1e] font-medium">
+              Recursos
+            </button>
+            <button onClick={() => navTo("/support")} className="px-3 py-1.5 text-sm text-[#6b5a4a] hover:text-[#3d2c1e] font-medium">
+              Suporte
+            </button>
+            <button onClick={() => navTo("/auth")} className="px-3 py-1.5 text-sm text-[#6b5a4a] hover:text-[#3d2c1e] font-medium">
               Entrar
-            </Button>
-            <Button size="sm" onClick={goToSignup} className="rounded-full text-xs sm:text-sm px-4 sm:px-5 bg-primary text-primary-foreground hover:bg-primary/90">
-              Criar conta grátis
-            </Button>
+            </button>
+            <button onClick={goToSignup} className="bg-[#eebf9c] hover:bg-[#d4a84b] text-[#3d2c1e] px-4 py-1.5 rounded-full text-sm font-bold">
+              Começar agora
+            </button>
           </div>
+          
+          {/* Mobile CTA */}
+          <button onClick={goToSignup} className="sm:hidden bg-[#eebf9c] text-[#3d2c1e] px-3 py-1.5 rounded-full text-sm font-bold">
+            Começar
+          </button>
         </div>
+        
+        {/* Mobile Menu */}
+        {mobileMenuOpen && (
+          <div className="sm:hidden bg-white border-t border-[#e8dcc8] py-3 px-4">
+            <div className="flex flex-col gap-2">
+              <button onClick={() => navTo("/")} className="text-left px-3 py-2 text-[#3d2c1e] font-medium border-b border-[#e8dcc8]">
+                Início
+              </button>
+              <button onClick={() => navTo("/pricing")} className="text-left px-3 py-2 text-[#3d2c1e] font-medium border-b border-[#e8dcc8]">
+                Preços
+              </button>
+              <button onClick={() => navTo("/features")} className="text-left px-3 py-2 text-[#3d2c1e] font-medium border-b border-[#e8dcc8]">
+                Recursos
+              </button>
+              <button onClick={() => navTo("/support")} className="text-left px-3 py-2 text-[#3d2c1e] font-medium border-b border-[#e8dcc8]">
+                Suporte
+              </button>
+              <button onClick={() => navTo("/auth")} className="text-left px-3 py-2 text-[#3d2c1e] font-medium border-b border-[#e8dcc8]">
+                Entrar
+              </button>
+              <button onClick={goToSignup} className="mt-2 bg-[#eebf9c] text-[#3d2c1e] py-3 rounded-full font-bold text-center">
+                Começar agora
+              </button>
+            </div>
+          </div>
+        )}
       </nav>
 
-      {/* ══════════ 1. HERO ══════════ */}
-      <motion.section style={{ opacity: heroOpacity, scale: heroScale }} className="relative pt-20 sm:pt-36 pb-12 sm:pb-32 px-4">
-        <div className="max-w-4xl mx-auto text-center relative z-10">
+      {/* Hero */}
+      <motion.section style={{ opacity: heroOpacity }} className="pt-24 pb-12 px-4">
+        <div className="max-w-3xl mx-auto text-center">
           <FadeInSection>
-            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-primary/10 text-primary text-xs sm:text-sm font-medium mb-4 sm:mb-6">
-              Milhares de profissionais já transformaram seus negócios
+            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#f5dcc3] text-[#d4a84b] text-xs font-medium mb-4">
+              Sistema completo para salões
             </span>
           </FadeInSection>
 
           <FadeInSection delay={0.1}>
-            <h1 className="font-display text-[1.75rem] sm:text-5xl md:text-7xl font-extrabold leading-[1.12] tracking-tight mb-4 sm:mb-6">
-              Ela era talentosa.{" "}
-              <span className="text-gradient">Mas estava quase desistindo.</span>
+            <h1 className="text-2xl sm:text-4xl md:text-5xl font-extrabold mb-4 leading-tight">
+              Organize, <span className="text-[#d4a84b]">automatize</span> e faça crescer
             </h1>
           </FadeInSection>
 
           <FadeInSection delay={0.2}>
-            <p className="text-base sm:text-xl text-muted-foreground max-w-2xl mx-auto mb-3 sm:mb-4 leading-relaxed">
-              Clientes esquecendo horário. Agenda bagunçada. Dinheiro entrando… mas sem controle.
-            </p>
-            <p className="text-sm sm:text-lg text-muted-foreground/80 max-w-xl mx-auto mb-2 sm:mb-3">
-              Até que ela decidiu parar de improvisar e começou a administrar o salão como uma <strong className="text-foreground">empresa</strong>.
-            </p>
-            <p className="text-sm sm:text-lg font-medium text-foreground max-w-xl mx-auto mb-6 sm:mb-10">
-              Em 90 dias, a agenda estava lotada. O faturamento cresceu. O estresse diminuiu.
+            <p className="text-sm sm:text-lg text-[#6b5a4a] max-w-xl mx-auto mb-6 leading-relaxed">
+              Tudo que você precisa para gerenciar seu salão em um só lugar: agenda, clientes, finanças e muito mais.
             </p>
           </FadeInSection>
 
           <FadeInSection delay={0.3}>
-            <Button
-              onClick={goToSignup}
-              size="lg"
-              className="relative rounded-full text-sm sm:text-lg px-6 sm:px-10 py-5 sm:py-7 h-auto font-bold bg-primary text-primary-foreground hover:bg-primary/90 shadow-2xl shadow-primary/30 group"
-            >
-              <span className="absolute inset-0 rounded-full animate-pulse bg-primary/20" />
-              <span className="relative flex items-center gap-2">
-                🔥 Quero essa transformação
-                <ArrowRight size={18} className="group-hover:translate-x-1 transition-transform" />
-              </span>
-            </Button>
+            <div className="flex flex-col sm:flex-row gap-3 justify-center">
+              <button
+                onClick={goToSignup}
+                className="bg-[#eebf9c] hover:bg-[#d4a84b] text-[#3d2c1e] px-6 sm:px-8 py-3 sm:py-4 rounded-full font-bold text-sm sm:text-base shadow-lg"
+              >
+                Começar agora
+              </button>
+              <button
+                onClick={() => navigate("/features")}
+                className="bg-white border border-[#e8dcc8] text-[#3d2c1e] px-6 sm:px-8 py-3 sm:py-4 rounded-full font-semibold text-sm sm:text-base"
+              >
+                Ver recursos
+              </button>
+            </div>
           </FadeInSection>
 
-          {/* Mock device */}
-          <FadeInSection delay={0.5} className="mt-10 sm:mt-20">
-            <div className="relative mx-auto max-w-3xl">
-              <div className="absolute -inset-4 bg-gradient-to-r from-primary/20 via-primary/5 to-primary/20 rounded-2xl sm:rounded-3xl blur-3xl" />
-              <div className="relative glass-card-strong rounded-xl sm:rounded-3xl overflow-hidden border border-primary/10">
-                <div className="h-7 sm:h-8 bg-card/80 flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 border-b border-border/30">
-                  <div className="w-2 h-2 sm:w-3 sm:h-3 rounded-full bg-destructive/60" />
-                  <div className="w-2 h-2 sm:w-3 sm:h-3 rounded-full bg-warning/60" />
-                  <div className="w-2 h-2 sm:w-3 sm:h-3 rounded-full bg-success/60" />
-                </div>
-                <div className="p-4 sm:p-10 space-y-3 sm:space-y-4">
-                  <div className="flex items-center gap-2 sm:gap-3 mb-4 sm:mb-6">
-                    <img src={logo} alt="" className="w-6 h-6 sm:w-8 sm:h-8 rounded-lg" />
-                    <div className="h-2.5 sm:h-3 w-20 sm:w-24 bg-muted rounded-full" />
-                  </div>
-                  <div className="grid grid-cols-3 gap-2 sm:gap-3">
-                    {[
-                      { label: "Agendamentos", val: "248", color: "primary" },
-                      { label: "Faturamento", val: "R$ 18.4k", color: "success" },
-                      { label: "Clientes", val: "167", color: "info" },
-                    ].map(({ label, val, color }) => (
-                      <div key={label} className="glass-card rounded-lg sm:rounded-xl p-2.5 sm:p-4 text-center">
-                        <p className="text-[10px] sm:text-xs text-muted-foreground truncate">{label}</p>
-                        <p className={`text-sm sm:text-xl font-bold text-${color}`}>{val}</p>
-                      </div>
-                    ))}
-                  </div>
-                  <div className="space-y-1.5 sm:space-y-2">
-                    {[1, 2, 3].map(i => (
-                      <div key={i} className="flex items-center gap-2 sm:gap-3 p-2 sm:p-3 glass-card rounded-lg sm:rounded-xl">
-                        <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-                          <Clock size={12} className="text-primary" />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="h-2 sm:h-2.5 w-20 sm:w-28 bg-muted rounded-full" />
-                          <div className="h-1.5 sm:h-2 w-14 sm:w-20 bg-muted/60 rounded-full mt-1" />
-                        </div>
-                        <div className="h-5 sm:h-6 w-12 sm:w-16 rounded-full bg-success/10 border border-success/20 shrink-0" />
-                      </div>
-                    ))}
-                  </div>
-                </div>
+          {/* Stats */}
+          <FadeInSection delay={0.4} className="mt-10 sm:mt-14">
+            <div className="flex justify-center gap-6 sm:gap-12">
+              <div className="text-center">
+                <p className="text-2xl sm:text-3xl font-bold text-[#d4a84b]">
+                  <AnimatedCounter target={5000} suffix="+" />
+                </p>
+                <p className="text-xs sm:text-sm text-[#6b5a4a]">Profissionais</p>
+              </div>
+              <div className="text-center">
+                <p className="text-2xl sm:text-3xl font-bold text-[#d4a84b]">
+                  <AnimatedCounter target={200000} prefix="R$ " suffix="+" />
+                </p>
+                <p className="text-xs sm:text-sm text-[#6b5a4a]">Faturado</p>
               </div>
             </div>
           </FadeInSection>
         </div>
       </motion.section>
 
-      {/* ══════════ 2. QUEBRA DE CRENÇA ══════════ */}
-      <section className="py-12 sm:py-32 px-4 relative">
-        <div className="max-w-3xl mx-auto text-center">
-          <FadeInSection>
-            <h2 className="font-display text-2xl sm:text-5xl font-extrabold mb-5 sm:mb-8">
-              O problema <span className="text-gradient">nunca foi</span> seu talento.
-            </h2>
-          </FadeInSection>
-          <FadeInSection delay={0.1}>
-            <p className="text-lg sm:text-2xl text-muted-foreground leading-relaxed mb-8 sm:mb-12">
-              Você aprendeu a atender.<br />
-              Mas <strong className="text-foreground">ninguém te ensinou a gerir.</strong>
-            </p>
-          </FadeInSection>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 text-left max-w-2xl mx-auto mb-8 sm:mb-12">
-            {[
-              ["Você não perde clientes por falta de qualidade", "Você perde por falta de organização"],
-              ["Você não fatura pouco por falta de demanda", "Você fatura pouco por falta de sistema"],
-            ].map(([wrong, right], i) => (
-              <FadeInSection key={i} delay={0.15 + i * 0.1}>
-                <div className="glass-card rounded-xl sm:rounded-2xl p-4 sm:p-6 hover-lift">
-                  <p className="text-muted-foreground text-xs sm:text-sm mb-1.5 sm:mb-2 line-through">{wrong}</p>
-                  <p className="font-semibold text-foreground text-sm sm:text-base">{right}</p>
-                </div>
-              </FadeInSection>
-            ))}
-          </div>
-          <FadeInSection delay={0.4}>
-            <p className="font-display text-xl sm:text-3xl font-bold">
-              "Salão não é hobby. <span className="text-gradient">É empresa.</span>"
-            </p>
-          </FadeInSection>
-        </div>
-      </section>
-
-      {/* ══════════ 3. O INIMIGO INVISÍVEL ══════════ */}
-      <section className="py-12 sm:py-32 px-4 relative">
-        <div className="absolute inset-0 bg-gradient-to-b from-destructive/[0.02] to-transparent pointer-events-none" />
-        <div className="max-w-3xl mx-auto text-center relative z-10">
-          <FadeInSection>
-            <h2 className="font-display text-2xl sm:text-5xl font-extrabold mb-5 sm:mb-6">
-              O improviso <span className="text-destructive">custa caro.</span>
-            </h2>
-          </FadeInSection>
-          <div className="space-y-2.5 sm:space-y-3 max-w-md mx-auto mb-8 sm:mb-12">
-            {enemies.map((item, i) => (
-              <FadeInSection key={i} delay={0.1 + i * 0.08}>
-                <div className="flex items-center gap-3 glass-card rounded-lg sm:rounded-xl p-3 sm:p-4 hover-lift">
-                  <X size={18} className="text-destructive shrink-0" />
-                  <p className="text-foreground font-medium text-left text-sm sm:text-base">{item}</p>
-                </div>
-              </FadeInSection>
-            ))}
-          </div>
-          <FadeInSection delay={0.6}>
-            <p className="text-base sm:text-xl text-muted-foreground italic px-2">
-              "Todo mês que você adia a organização, você paga com <strong className="text-foreground">crescimento</strong>."
-            </p>
-          </FadeInSection>
-        </div>
-      </section>
-
-      {/* ══════════ 4. A VIRADA — FEATURES ══════════ */}
-      <section className="py-12 sm:py-32 px-4 relative">
-        <div className="max-w-6xl mx-auto">
-          <FadeInSection>
-            <div className="text-center mb-8 sm:mb-16">
-              <h2 className="font-display text-2xl sm:text-5xl font-extrabold mb-3 sm:mb-4">
-                A estrutura que transforma{" "}
-                <span className="text-gradient">talento em faturamento.</span>
-              </h2>
-            </div>
-          </FadeInSection>
-          <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-5">
-            {features.map((f, i) => (
-              <FadeInSection key={i} delay={0.05 * i}>
-                <div className="glass-card rounded-xl sm:rounded-2xl p-4 sm:p-8 hover-lift group h-full">
-                  <div className="w-10 h-10 sm:w-14 sm:h-14 rounded-xl sm:rounded-2xl bg-primary/10 flex items-center justify-center mb-3 sm:mb-5 group-hover:bg-primary/20 transition-colors">
-                    <f.icon size={20} className="text-primary sm:hidden" />
-                    <f.icon size={26} className="text-primary hidden sm:block" />
-                  </div>
-                  <h3 className="font-display text-sm sm:text-lg font-bold mb-1 sm:mb-2">{f.title}</h3>
-                  <p className="text-muted-foreground text-xs sm:text-sm leading-relaxed">{f.desc}</p>
-                </div>
-              </FadeInSection>
-            ))}
-          </div>
-          <FadeInSection delay={0.4} className="text-center mt-8 sm:mt-12">
-            <p className="font-display text-lg sm:text-2xl font-semibold">
-              Você atende. O sistema organiza. <span className="text-gradient">O negócio cresce.</span>
-            </p>
-          </FadeInSection>
-        </div>
-      </section>
-
-      {/* ══════════ 5. PROVA SOCIAL ══════════ */}
-      <section className="py-12 sm:py-32 px-4 relative">
+      {/* All Features Grid */}
+      <section className="py-12 px-4 bg-white">
         <div className="max-w-5xl mx-auto">
           <FadeInSection>
-            <h2 className="font-display text-2xl sm:text-5xl font-extrabold text-center mb-3 sm:mb-4">
-              Eles decidiram <span className="text-gradient">agir.</span>
+            <h2 className="text-xl sm:text-3xl font-bold text-center mb-3">
+              Todos os recursos que você precisa
+            </h2>
+            <p className="text-center text-[#6b5a4a] mb-8 text-sm sm:text-base">
+              Clique em qualquer um para ver detalhes
+            </p>
+          </FadeInSection>
+
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 sm:gap-4">
+            {allFeatures.map((f, i) => (
+              <FeatureCard key={i} {...f} delay={0.02 * i} />
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* Benefits */}
+      <section className="py-12 px-4 bg-[#faf3e8]">
+        <div className="max-w-3xl mx-auto">
+          <FadeInSection>
+            <h2 className="text-xl sm:text-3xl font-bold text-center mb-8">
+              Por que usar o Gende?
             </h2>
           </FadeInSection>
-          <FadeInSection delay={0.1}>
-            <div className="text-center mb-8 sm:mb-16">
-              <p className="text-3xl sm:text-5xl font-extrabold text-gradient font-display">
-                +R$ <AnimatedCounter target={200000} prefix="" suffix="" />
-              </p>
-              <p className="text-muted-foreground text-sm sm:text-base mt-1 sm:mt-2">já movimentados através da plataforma</p>
-            </div>
-          </FadeInSection>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-5">
-            {testimonials.map((t, i) => (
-              <FadeInSection key={i} delay={0.1 + i * 0.1}>
-                <div className="glass-card rounded-xl sm:rounded-2xl p-5 sm:p-8 hover-lift h-full flex flex-col">
-                  <div className="flex gap-0.5 mb-3 sm:mb-4">
-                    {[...Array(t.stars)].map((_, s) => (
-                      <Star key={s} size={14} className="text-warning fill-warning" />
-                    ))}
+          <div className="space-y-3">
+            {[
+              "Agenda automatizada 24/7",
+              "Reduza faltas com lembretes",
+              "Controle financeiro completo",
+              "Gestão de clientes e equipe",
+              "Marketing automático",
+              "Suporte humanizado",
+            ].map((item, i) => (
+              <FadeInSection key={i} delay={0.1 + i * 0.05}>
+                <div className="flex items-center gap-3 bg-white p-4 rounded-xl border border-[#e8dcc8]">
+                  <div className="w-6 h-6 rounded-full bg-[#eebf9c] flex items-center justify-center shrink-0">
+                    <Check size={14} className="text-[#d4a84b]" />
                   </div>
-                  <p className="text-foreground leading-relaxed flex-1 mb-3 sm:mb-4 text-sm sm:text-base">"{t.text}"</p>
-                  <div>
-                    <p className="font-semibold text-sm">{t.name}</p>
-                    <p className="text-xs text-muted-foreground">{t.role}</p>
-                  </div>
+                  <span className="text-sm sm:text-base text-[#3d2c1e] font-medium">{item}</span>
                 </div>
               </FadeInSection>
             ))}
@@ -415,61 +382,26 @@ const Landing = () => {
         </div>
       </section>
 
-      {/* ══════════ 6. OFERTA LIMITADA ══════════ */}
-      <section className="py-12 sm:py-32 px-4 relative">
-        <div className="absolute inset-0 bg-gradient-to-b from-primary/[0.03] to-transparent pointer-events-none" />
-        <div className="max-w-3xl mx-auto text-center relative z-10">
-          <FadeInSection>
-            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-warning/10 text-warning text-xs sm:text-sm font-medium mb-4 sm:mb-6">
-              <Zap size={13} /> Vagas limitadas
-            </span>
-            <h2 className="font-display text-2xl sm:text-5xl font-extrabold mb-4 sm:mb-6">
-              Estamos abrindo novas contas{" "}
-              <span className="text-gradient">por tempo limitado.</span>
-            </h2>
-            <p className="text-muted-foreground text-sm sm:text-lg max-w-xl mx-auto mb-8 sm:mb-10">
-              Para manter qualidade no suporte e estabilidade da plataforma, estamos liberando apenas um número limitado de novos cadastros nesta fase.
-            </p>
-          </FadeInSection>
-          <FadeInSection delay={0.2}>
-            <CountdownTimer />
-          </FadeInSection>
-          <FadeInSection delay={0.3} className="mt-8 sm:mt-10">
-            <Button
-              onClick={goToSignup}
-              size="lg"
-              className="rounded-full text-sm sm:text-lg px-6 sm:px-10 py-5 sm:py-7 h-auto font-bold bg-primary text-primary-foreground hover:bg-primary/90 shadow-2xl shadow-primary/30"
-            >
-              🔥 Garantir minha vaga agora
-            </Button>
-          </FadeInSection>
-        </div>
-      </section>
-
-      {/* ══════════ 7. BÔNUS ══════════ */}
-      <section className="py-12 sm:py-32 px-4">
+      {/* Testimonials */}
+      <section className="py-12 px-4">
         <div className="max-w-4xl mx-auto">
           <FadeInSection>
-            <h2 className="font-display text-2xl sm:text-5xl font-extrabold text-center mb-3 sm:mb-4">
-              Entrando agora <span className="text-gradient">você recebe:</span>
+            <h2 className="text-xl sm:text-3xl font-bold text-center mb-8">
+              O que dizem nossos clientes
             </h2>
-            <p className="text-center text-muted-foreground text-sm sm:text-base mb-8 sm:mb-12">Esses bônus podem sair do ar a qualquer momento.</p>
           </FadeInSection>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-5">
-            {bonuses.map((b, i) => (
-              <FadeInSection key={i} delay={0.1 + i * 0.08}>
-                <div className="glass-card rounded-xl sm:rounded-2xl p-4 sm:p-6 hover-lift glow-border group">
-                  <div className="flex items-start gap-3 sm:gap-4">
-                    <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl sm:rounded-2xl bg-primary/10 flex items-center justify-center shrink-0 group-hover:bg-primary/20 transition-colors">
-                      <Gift size={18} className="text-primary sm:hidden" />
-                      <Gift size={22} className="text-primary hidden sm:block" />
-                    </div>
-                    <div className="min-w-0">
-                      <p className="text-[10px] sm:text-xs text-primary font-semibold mb-0.5 sm:mb-1">Bônus {i + 1}</p>
-                      <h3 className="font-bold text-sm sm:text-base mb-0.5 sm:mb-1">{b.title}</h3>
-                      <p className="text-xs sm:text-sm text-muted-foreground">{b.desc}</p>
-                    </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            {testimonials.map((t, i) => (
+              <FadeInSection key={i} delay={0.1 + i * 0.1}>
+                <div className="bg-white p-5 rounded-2xl border border-[#e8dcc8]">
+                  <div className="flex gap-0.5 mb-3">
+                    {[...Array(t.stars)].map((_, s) => (
+                      <Star key={s} size={14} className="text-[#d4a84b] fill-[#d4a84b]" />
+                    ))}
                   </div>
+                  <p className="text-[#3d2c1e] text-sm mb-3">"{t.text}"</p>
+                  <p className="font-semibold text-[#3d2c1e] text-sm">{t.name}</p>
+                  <p className="text-[#6b5a4a] text-xs">{t.role}</p>
                 </div>
               </FadeInSection>
             ))}
@@ -477,119 +409,70 @@ const Landing = () => {
         </div>
       </section>
 
-      {/* ══════════ 8. PLANOS ══════════ */}
-      <section className="py-12 sm:py-32 px-4 relative">
-        <div className="max-w-5xl mx-auto">
+      {/* Pricing */}
+      <section className="py-12 px-4 bg-white">
+        <div className="max-w-4xl mx-auto">
           <FadeInSection>
-            <h2 className="font-display text-2xl sm:text-5xl font-extrabold text-center mb-3 sm:mb-4">
-              Você trabalha horas por{" "}
-              <span className="text-gradient">R$120.</span>
+            <h2 className="text-xl sm:text-3xl font-bold text-center mb-4">
+              Planos feitos para você
             </h2>
-            <p className="text-center text-muted-foreground text-sm sm:text-lg mb-6 sm:mb-10">
-              Perder esse valor por desorganização deveria doer mais do que investir em solução.
+            <p className="text-center text-[#6b5a4a] mb-6 text-sm sm:text-base">
+              Escolha o que melhor se encaixa no seu negócio
             </p>
           </FadeInSection>
 
           {/* Toggle */}
-          <FadeInSection delay={0.1} className="flex justify-center mb-8 sm:mb-12">
-            <div className="glass-card rounded-full p-1 flex">
+          <FadeInSection delay={0.1} className="flex justify-center mb-8">
+            <div className="bg-[#fdf8f3] rounded-full p-1 flex border border-[#e8dcc8]">
               <button
                 onClick={() => setBillingCycle("monthly")}
-                className={`px-4 sm:px-6 py-2 sm:py-2.5 rounded-full text-xs sm:text-sm font-medium transition-all ${billingCycle === "monthly" ? "bg-primary text-primary-foreground shadow-lg" : "text-muted-foreground hover:text-foreground"}`}
+                className={`px-4 sm:px-6 py-2 rounded-full text-sm font-medium transition-all ${billingCycle === "monthly" ? "bg-[#eebf9c] text-[#3d2c1e]" : "text-[#6b5a4a]"}`}
               >
                 Mensal
               </button>
               <button
                 onClick={() => setBillingCycle("annual")}
-                className={`px-4 sm:px-6 py-2 sm:py-2.5 rounded-full text-xs sm:text-sm font-medium transition-all ${billingCycle === "annual" ? "bg-primary text-primary-foreground shadow-lg" : "text-muted-foreground hover:text-foreground"}`}
+                className={`px-4 sm:px-6 py-2 rounded-full text-sm font-medium transition-all ${billingCycle === "annual" ? "bg-[#eebf9c] text-[#3d2c1e]" : "text-[#6b5a4a]"}`}
               >
-                Anual <span className="text-[10px] sm:text-xs opacity-80">(economize)</span>
+                Anual <span className="text-xs opacity-80">(20% off)</span>
               </button>
             </div>
           </FadeInSection>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-5 max-w-3xl mx-auto">
-            {[
-              {
-                name: "Essencial",
-                desc: "Para quem está começando a se organizar",
-                price: billingCycle === "monthly" ? "49,90" : "41,66",
-                priceLabel: billingCycle === "monthly" ? "/mês" : "/mês (cobrado anualmente)",
-                annualTotal: billingCycle === "annual" ? "R$ 499,90/ano" : null,
-                features: [
-                  "100 agendamentos/mês",
-                  "10 serviços",
-                  "100 clientes",
-                  "15 produtos em estoque",
-                  "5 lembretes/dia via WhatsApp",
-                  "Página pública padrão",
-                  "Relatórios básicos",
-                  "Controle financeiro",
-                  "Caixa registradora",
-                  "Chat de suporte",
-                ],
-                popular: false,
-              },
-              {
-                name: "Enterprise",
-                desc: "Tudo ilimitado para crescer de verdade",
-                price: billingCycle === "monthly" ? "99,90" : "83,25",
-                priceLabel: billingCycle === "monthly" ? "/mês" : "/mês (cobrado anualmente)",
-                annualTotal: billingCycle === "annual" ? "R$ 999,00/ano" : null,
-                features: [
-                  "Agendamentos ilimitados",
-                  "Serviços ilimitados",
-                  "Clientes ilimitados",
-                  "Produtos ilimitados",
-                  "20 lembretes/dia via WhatsApp",
-                  "3 campanhas/dia via WhatsApp",
-                  "Página pública personalizada",
-                  "Relatórios avançados",
-                  "Cobrar sinal de agendamento",
-                  "Cupons e promoções",
-                  "Avaliações de clientes",
-                  "Assistente IA",
-                  "Até 5 profissionais inclusos",
-                  "Integração Google Calendar",
-                  "Suporte prioritário",
-                ],
-                popular: true,
-              },
-            ].map((plan, i) => (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
+            {plans.map((plan, i) => (
               <FadeInSection key={i} delay={0.1 + i * 0.1}>
-                <div className={`relative glass-card rounded-xl sm:rounded-2xl p-5 sm:p-8 hover-lift h-full flex flex-col ${plan.popular ? "glow-border" : ""}`}>
+                <div className={`relative bg-white rounded-2xl p-5 sm:p-6 border-2 ${plan.popular ? 'border-[#eebf9c]' : 'border-[#e8dcc8]'} h-full`}>
                   {plan.popular && (
                     <div className="absolute -top-3 left-1/2 -translate-x-1/2">
-                      <span className="px-3 sm:px-4 py-1 rounded-full bg-primary text-primary-foreground text-[10px] sm:text-xs font-bold shadow-lg whitespace-nowrap">
-                        RECOMENDADO
+                      <span className="px-3 py-1 rounded-full bg-[#eebf9c] text-[#3d2c1e] text-xs font-bold">
+                        Mais escolhido
                       </span>
                     </div>
                   )}
-                  <h3 className="font-display text-lg sm:text-xl font-bold">{plan.name}</h3>
-                  <p className="text-xs sm:text-sm text-muted-foreground mb-3 sm:mb-4">{plan.desc}</p>
-                  <div className="mb-4 sm:mb-6">
+                  <h3 className="text-lg font-bold text-[#3d2c1e] mb-1">{plan.name}</h3>
+                  <p className="text-xs sm:text-sm text-[#6b5a4a] mb-4">{plan.desc}</p>
+                  <div className="mb-4">
                     <div className="flex items-baseline gap-1">
-                      <span className="text-3xl sm:text-4xl font-extrabold">R$ {plan.price}</span>
-                      <span className="text-muted-foreground text-xs sm:text-sm">{plan.priceLabel}</span>
+                      <span className="text-3xl font-bold text-[#3d2c1e]">R$ {plan.price}</span>
+                      <span className="text-[#6b5a4a] text-sm">{plan.priceLabel}</span>
                     </div>
-                    {plan.annualTotal && (
-                      <p className="text-xs text-primary mt-1">{plan.annualTotal}</p>
-                    )}
+                    {plan.annualLabel && <p className="text-xs text-[#d4a84b] mt-1">{plan.annualLabel}</p>}
                   </div>
-                  <ul className="space-y-2 sm:space-y-3 flex-1 mb-4 sm:mb-6">
+                  <ul className="space-y-2 mb-6">
                     {plan.features.map((f, fi) => (
-                      <li key={fi} className="flex items-center gap-2 text-xs sm:text-sm">
-                        <Check size={14} className="text-success shrink-0" />
+                      <li key={fi} className="flex items-center gap-2 text-xs sm:text-sm text-[#3d2c1e]">
+                        <Check size={14} className="text-[#d4a84b] shrink-0" />
                         <span>{f}</span>
                       </li>
                     ))}
                   </ul>
-                  <Button
+                  <button
                     onClick={goToSignup}
-                    className={`w-full rounded-full h-11 sm:h-12 font-semibold text-sm ${plan.popular ? "bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20" : "bg-secondary text-secondary-foreground hover:bg-secondary/80"}`}
+                    className={`w-full py-3 rounded-full font-bold text-sm ${plan.popular ? 'bg-[#eebf9c] hover:bg-[#d4a84b] text-[#3d2c1e]' : 'bg-[#fdf8f3] border border-[#e8dcc8] text-[#3d2c1e] hover:bg-[#f5dcc3]'}`}
                   >
-                    Começar agora
-                  </Button>
+                    {plan.cta}
+                  </button>
                 </div>
               </FadeInSection>
             ))}
@@ -597,125 +480,65 @@ const Landing = () => {
         </div>
       </section>
 
-      {/* ══════════ 9. GARANTIA ══════════ */}
-      <section className="py-12 sm:py-28 px-4">
-        <FadeInSection>
-          <div className="max-w-2xl mx-auto text-center glass-card rounded-2xl sm:rounded-3xl p-6 sm:p-12 glow-border">
-            <div className="w-12 h-12 sm:w-16 sm:h-16 rounded-full bg-success/10 flex items-center justify-center mx-auto mb-4 sm:mb-6">
-              <Shield size={24} className="text-success sm:hidden" />
-              <Shield size={32} className="text-success hidden sm:block" />
-            </div>
-            <h2 className="font-display text-xl sm:text-3xl font-bold mb-3 sm:mb-4">
-              Teste grátis. Sem cartão. Sem risco.
-            </h2>
-            <p className="text-muted-foreground text-sm sm:text-lg">
-              Se não fizer sentido para você, basta cancelar. Sem letras miúdas, sem pegadinhas.
-            </p>
-          </div>
-        </FadeInSection>
+      {/* CTA */}
+      <section className="py-12 px-4 bg-[#eebf9c]">
+        <div className="max-w-2xl mx-auto text-center">
+          <h2 className="text-xl sm:text-3xl font-bold text-[#3d2c1e] mb-3">
+            Pronto para transformar seu salão?
+          </h2>
+          <p className="text-[#3d2c1e]/80 mb-6 text-sm sm:text-base">
+            Comece seu teste gratuito de 30 dias.
+          </p>
+          <button
+            onClick={goToSignup}
+            className="bg-[#3d2c1e] text-white px-8 py-4 rounded-full font-bold text-sm sm:text-base shadow-lg"
+          >
+            Criar conta gratuita
+          </button>
+        </div>
       </section>
 
-      {/* ══════════ FAQ ══════════ */}
-      <section className="py-12 sm:py-24 px-4">
+      {/* FAQ */}
+      <section className="py-12 px-4">
         <div className="max-w-3xl mx-auto">
           <FadeInSection>
-            <h2 className="font-display text-2xl sm:text-4xl font-extrabold text-center mb-3 sm:mb-4">
+            <h2 className="text-xl sm:text-3xl font-bold text-center mb-8">
               Perguntas frequentes
             </h2>
-            <p className="text-center text-muted-foreground text-sm sm:text-base mb-8 sm:mb-12">
-              Tire suas dúvidas antes de começar.
-            </p>
           </FadeInSection>
-
-          <FadeInSection delay={0.1}>
-            <div className="space-y-3">
-              {[
-                {
-                  q: "Preciso pagar algo para testar?",
-                  a: "Não! Você pode criar sua conta e testar gratuitamente. Só paga quando decidir que faz sentido para o seu negócio."
-                },
-                {
-                  q: "Funciona para profissional autônomo?",
-                  a: "Sim! O Gende funciona tanto para quem trabalha sozinho quanto para salões e barbearias com equipe. Você escolhe o que faz sentido para você."
-                },
-                {
-                  q: "Meus clientes precisam baixar algum app?",
-                  a: "Não. Seus clientes agendam pela sua página pública personalizada, direto pelo celular, sem instalar nada. Simples assim."
-                },
-                {
-                  q: "Consigo gerenciar comissões da equipe?",
-                  a: "Sim! O sistema calcula automaticamente as comissões de cada profissional ao concluir um atendimento e ainda notifica pelo WhatsApp."
-                },
-                {
-                  q: "Como funciona a integração com WhatsApp?",
-                  a: "Você conecta seu WhatsApp em poucos segundos via QR Code. A partir daí, confirmações, lembretes e campanhas são enviados automaticamente para seus clientes."
-                },
-                {
-                  q: "Posso cancelar a qualquer momento?",
-                  a: "Sim, sem multa e sem burocracia. Você cancela quando quiser, sem letras miúdas."
-                },
-                {
-                  q: "Vocês oferecem suporte?",
-                  a: "Sim! Ao criar sua conta, um analista entra em contato pelo WhatsApp para te ajudar na configuração. E nosso suporte está sempre disponível no chat do sistema."
-                },
-              ].map((faq, i) => (
-                <FaqItem key={i} question={faq.q} answer={faq.a} />
-              ))}
-            </div>
-          </FadeInSection>
-        </div>
-      </section>
-
-      {/* ══════════ 10. CTA FINAL ══════════ */}
-      <section className="py-12 sm:py-32 px-4 relative">
-        <div className="absolute inset-0 bg-gradient-to-t from-primary/[0.04] to-transparent pointer-events-none" />
-        <div className="max-w-3xl mx-auto text-center relative z-10">
-          <FadeInSection>
-            <h2 className="font-display text-2xl sm:text-5xl md:text-6xl font-extrabold leading-tight mb-4 sm:mb-6">
-              Daqui a 6 meses você pode estar <span className="text-gradient">organizado</span>.
-              <br className="hidden sm:block" />
-              <span className="sm:hidden"> </span>Ou no mesmo lugar.
-            </h2>
-          </FadeInSection>
-          <FadeInSection delay={0.1}>
-            <p className="text-base sm:text-xl text-muted-foreground mb-6 sm:mb-10">A decisão começa agora.</p>
-          </FadeInSection>
-          <FadeInSection delay={0.2}>
-            <Button
-              onClick={goToSignup}
-              size="lg"
-              className="relative rounded-full text-sm sm:text-lg px-6 sm:px-10 py-5 sm:py-7 h-auto font-bold bg-primary text-primary-foreground hover:bg-primary/90 shadow-2xl shadow-primary/30 group"
-            >
-              <span className="absolute inset-0 rounded-full animate-pulse bg-primary/20" />
-              <span className="relative flex items-center gap-2">
-                🔥 Criar minha conta gratuita agora
-                <ArrowRight size={18} className="group-hover:translate-x-1 transition-transform" />
-              </span>
-            </Button>
-            <p className="text-xs sm:text-sm text-muted-foreground mt-3 sm:mt-4">Leva menos de 2 minutos.</p>
-          </FadeInSection>
-        </div>
-      </section>
-
-      {/* ══════════ FOOTER ══════════ */}
-      <footer className="border-t border-border/40 py-6 sm:py-10 px-4 pb-20 sm:pb-10">
-        <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-3 sm:gap-4">
-          <div className="flex items-center gap-2">
-            <img src={logo} alt="Logo" className="w-6 h-6 sm:w-7 sm:h-7 rounded-lg" />
-            <span className="font-display font-bold text-sm">Gende</span>
+          <div className="space-y-3">
+            {faqs.map((faq, i) => (
+              <FaqItem key={i} question={faq.q} answer={faq.a} />
+            ))}
           </div>
-          <p className="text-[10px] sm:text-xs text-muted-foreground">© {new Date().getFullYear()} Gende. Todos os direitos reservados.</p>
+        </div>
+      </section>
+
+      {/* Footer */}
+      <footer className="py-8 px-4 bg-[#3d2c1e]">
+        <div className="max-w-6xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div className="flex items-center gap-2">
+            <img src={logo} alt="Logo" className="w-7 h-7 rounded-lg" />
+            <span className="font-bold text-[#f5dcc3]">Gende</span>
+          </div>
+          <div className="flex gap-4 text-xs sm:text-sm">
+            <a href="/pricing" className="text-[#f5dcc3]/70 hover:text-[#f5dcc3]">Preços</a>
+            <a href="/features" className="text-[#f5dcc3]/70 hover:text-[#f5dcc3]">Recursos</a>
+            <a href="/support" className="text-[#f5dcc3]/70 hover:text-[#f5dcc3]">Suporte</a>
+            <a href="/politica-de-privacidade" className="text-[#f5dcc3]/70 hover:text-[#f5dcc3]">Privacidade</a>
+          </div>
+          <p className="text-[#f5dcc3]/50 text-xs">© {new Date().getFullYear()} Gende</p>
         </div>
       </footer>
 
-      {/* ══════════ FIXED MOBILE CTA ══════════ */}
-      <div className="fixed bottom-0 left-0 right-0 z-50 p-2.5 sm:hidden bg-background/80 backdrop-blur-2xl border-t border-border/40 safe-area-bottom">
-        <Button
+      {/* Mobile CTA Fixed */}
+      <div className="fixed bottom-0 left-0 right-0 p-3 sm:hidden bg-white border-t border-[#e8dcc8] z-40">
+        <button
           onClick={goToSignup}
-          className="w-full rounded-full py-3.5 h-auto font-bold bg-primary text-primary-foreground hover:bg-primary/90 shadow-xl shadow-primary/30 text-sm"
+          className="w-full bg-[#eebf9c] text-[#3d2c1e] py-3 rounded-full font-bold"
         >
-          🔥 Criar conta grátis
-        </Button>
+          Começar agora
+        </button>
       </div>
     </div>
   );
