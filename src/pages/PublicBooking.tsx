@@ -73,6 +73,7 @@ const PublicBooking = () => {
   const accent = professional?.component_color || professional?.primary_color || "#c026d3";
   const bgColor = professional?.bg_color || "#fff1f7";
   const isSalon = professional?.account_type === "salon";
+  const showBookingDetails = step === 4 || signalScreen || confirmed;
 
   useEffect(() => {
     const load = async () => {
@@ -329,29 +330,49 @@ const PublicBooking = () => {
             </div>
             <div className="space-y-5 p-6">
               <div className="flex gap-2">{[1, 2, 3, 4].map((i) => <div key={i} className={cn("h-2 flex-1 rounded-full", step >= i ? "opacity-100" : "opacity-25")} style={{ backgroundColor: accent }} />)}</div>
-              <div className="rounded-[28px] border border-slate-100 bg-slate-50 p-5">
-                <p className="text-xs font-semibold uppercase tracking-[0.28em] text-slate-400">Resumo</p>
-                <div className="mt-4 space-y-3">
-                  {[
-                    ["Cliente", clientName || "-"],
-                    ["WhatsApp", maskPhone(clientPhone) || "-"],
-                    ["Servicos", selectedServices.map((s) => s.name).join(", ") || "-"],
-                    ["Profissional", selectedEmployee?.name || (isSalon ? "-" : professional.name)],
-                    ["Horario", slot ? `${format(new Date(slot.start_time), "dd/MM/yyyy")} as ${timeSP(slot.start_time)}` : "-"],
-                  ].map(([label, value]) => (
-                    <div key={label} className="rounded-[22px] bg-white p-3 shadow-sm">
-                      <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-400">{label}</p>
-                      <p className="mt-1 text-sm font-bold text-slate-800">{value}</p>
+              {showBookingDetails ? (
+                <>
+                  <div className="rounded-[28px] border border-slate-100 bg-slate-50 p-5">
+                    <p className="text-xs font-semibold uppercase tracking-[0.28em] text-slate-400">Resumo</p>
+                    <div className="mt-4 space-y-3">
+                      {[
+                        ["Cliente", clientName || "-"],
+                        ["WhatsApp", maskPhone(clientPhone) || "-"],
+                        ["Servicos", selectedServices.map((s) => s.name).join(", ") || "-"],
+                        ["Profissional", selectedEmployee?.name || (isSalon ? "-" : professional.name)],
+                        ["Horario", slot ? `${format(new Date(slot.start_time), "dd/MM/yyyy")} as ${timeSP(slot.start_time)}` : "-"],
+                      ].map(([label, value]) => (
+                        <div key={label} className="rounded-[22px] bg-white p-3 shadow-sm">
+                          <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-400">{label}</p>
+                          <p className="mt-1 text-sm font-bold text-slate-800">{value}</p>
+                        </div>
+                      ))}
                     </div>
-                  ))}
+                  </div>
+                  <div className="rounded-[28px] bg-slate-900 p-5 text-white">
+                    <p className="text-xs uppercase tracking-[0.24em] text-white/60">Total previsto</p>
+                    <p className="mt-2 text-3xl font-black">{money(totalPrice)}</p>
+                    <p className="mt-2 text-sm text-white/70">{totalDuration} min no total</p>
+                    {needsSignal && <p className="mt-4 rounded-2xl bg-white/10 px-3 py-2 text-sm text-white/80">Sinal: <strong>{money(signalAmount)}</strong></p>}
+                  </div>
+                </>
+              ) : (
+                <div className="rounded-[28px] border border-slate-100 bg-slate-50 p-5">
+                  <p className="text-xs font-semibold uppercase tracking-[0.28em] text-slate-400">Etapas</p>
+                  <div className="mt-4 space-y-3">
+                    {[
+                      "1. Informe nome e WhatsApp",
+                      "2. Escolha os servicos",
+                      "3. Escolha data, horario e profissional",
+                      "4. Revise e confirme o agendamento",
+                    ].map((item) => (
+                      <div key={item} className="rounded-[22px] bg-white p-3 shadow-sm">
+                        <p className="text-sm font-semibold text-slate-700">{item}</p>
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              </div>
-              <div className="rounded-[28px] bg-slate-900 p-5 text-white">
-                <p className="text-xs uppercase tracking-[0.24em] text-white/60">Total previsto</p>
-                <p className="mt-2 text-3xl font-black">{money(totalPrice)}</p>
-                <p className="mt-2 text-sm text-white/70">{totalDuration} min no total</p>
-                {needsSignal && <p className="mt-4 rounded-2xl bg-white/10 px-3 py-2 text-sm text-white/80">Sinal: <strong>{money(signalAmount)}</strong></p>}
-              </div>
+              )}
             </div>
           </div>
         </aside>
