@@ -16,11 +16,13 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { toast } from "sonner";
-import type { Tables } from "@/integrations/supabase/types";
+import type { Tables, TablesInsert, TablesUpdate } from "@/integrations/supabase/types";
+import { SERVICE_ICON_OPTIONS, getServiceIconOption } from "@/lib/service-icons";
 
 type Service = Tables<"services">;
+type ServiceWithMeta = Service & { maintenance_interval_days?: number | null; icon_key?: string | null };
 
-const defaultForm = { name: "", duration_minutes: 30, price: 0, category: "Geral", active: true, description: "", maintenance_interval_days: 0 };
+const defaultForm = { name: "", duration_minutes: 30, price: 0, category: "Geral", active: true, description: "", maintenance_interval_days: 0, icon_key: "scissors" };
 
 /** Combobox de categorias: lista existentes + permite criar nova */
 const CategoryCombobox = ({ categories, value, onChange }: { categories: string[]; value: string; onChange: (v: string) => void }) => {
@@ -91,6 +93,54 @@ const CategoryCombobox = ({ categories, value, onChange }: { categories: string[
   );
 };
 
+const ServiceIconPicker = ({ value, onChange }: { value: string; onChange: (v: string) => void }) => {
+  const selected = getServiceIconOption(value);
+
+  return (
+    <div className="space-y-1.5">
+      <Label>Ícone do serviço</Label>
+      <Popover>
+        <PopoverTrigger asChild>
+          <button
+            type="button"
+            className="flex h-12 w-full items-center justify-between rounded-md border border-input bg-background px-3 text-sm transition-colors hover:bg-accent/5"
+          >
+            <span className="flex items-center gap-3">
+              <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary/10 text-lg">
+                {selected.emoji}
+              </span>
+              <span className="text-left">
+                <span className="block font-medium text-foreground">{selected.label}</span>
+                <span className="block text-xs text-muted-foreground">Escolha o ícone exibido no agendamento público</span>
+              </span>
+            </span>
+            <ChevronDown size={14} className="text-muted-foreground" />
+          </button>
+        </PopoverTrigger>
+        <PopoverContent className="w-[360px] p-3" align="start">
+          <div className="grid grid-cols-4 gap-2">
+            {SERVICE_ICON_OPTIONS.map((option) => (
+              <button
+                key={option.key}
+                type="button"
+                onClick={() => onChange(option.key)}
+                className={`rounded-2xl border p-2.5 text-center transition-all ${
+                  option.key === value
+                    ? "border-primary bg-primary/10 shadow-sm"
+                    : "border-border/60 hover:border-primary/30 hover:bg-accent/5"
+                }`}
+              >
+                <span className="mb-1 block text-2xl">{option.emoji}</span>
+                <span className="block text-[11px] font-medium leading-tight text-foreground">{option.label}</span>
+              </button>
+            ))}
+          </div>
+        </PopoverContent>
+      </Popover>
+    </div>
+  );
+};
+
 const Services = () => {
   const { data: services, isLoading } = useServices();
   const { data: professional } = useProfessional();
@@ -139,8 +189,18 @@ const Services = () => {
 
   const openCreate = () => { setEditing(null); setForm(defaultForm); setDialogOpen(true); };
   const openEdit = (s: Service) => {
+    const service = s as ServiceWithMeta;
     setEditing(s);
-    setForm({ name: s.name, duration_minutes: s.duration_minutes, price: Number(s.price), category: s.category || "Geral", active: s.active, description: s.description || "", maintenance_interval_days: (s as any).maintenance_interval_days || 0 });
+    setForm({
+      name: service.name,
+      duration_minutes: service.duration_minutes,
+      price: Number(service.price),
+      category: service.category || "Geral",
+      active: service.active,
+      description: service.description || "",
+      maintenance_interval_days: service.maintenance_interval_days || 0,
+      icon_key: service.icon_key || "scissors",
+    });
     setDialogOpen(true);
   };
 
@@ -148,10 +208,10 @@ const Services = () => {
     if (!form.name.trim()) { toast.error("Nome é obrigatório"); return; }
     try {
       if (editing) {
-        await updateService.mutateAsync({ id: editing.id, ...form });
+        await updateService.mutateAsync({ id: editing.id, ...form } as TablesUpdate<"services"> & { id: string });
         toast.success("Serviço atualizado!");
       } else {
-        await createService.mutateAsync(form);
+        await createService.mutateAsync(form as TablesInsert<"services">);
         toast.success("Serviço criado!");
       }
       setDialogOpen(false);
@@ -204,8 +264,8 @@ const Services = () => {
         count++;
       }
       toast.success(`${count} serviço(s) importado(s)!`);
-    } catch (e: any) {
-      toast.error(e.message || "Erro ao importar");
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Erro ao importar");
     }
   };
 
@@ -317,7 +377,10 @@ const Services = () => {
         </div>
       ) : (
         <div className="space-y-3">
-          {filtered.map((service, i) => (
+          {filtered.map((service, i) => {
+            const icon = getServiceIconOption((service as ServiceWithMeta).icon_key, service.name, service.category);
+
+            return (
             <motion.div
               key={service.id}
               initial={{ opacity: 0, y: 10 }}
@@ -330,7 +393,7 @@ const Services = () => {
                 <div className={`w-10 h-10 md:w-12 md:h-12 rounded-xl flex items-center justify-center flex-shrink-0 ${
                   service.active ? "bg-primary/10" : "bg-muted/30"
                 }`}>
-                  <Scissors size={18} className={service.active ? "text-primary" : "text-muted-foreground"} />
+                  <span className="text-xl">{icon.emoji}</span>
                 </div>
 
                 {/* Info */}
@@ -398,7 +461,8 @@ const Services = () => {
                 </div>
               </div>
             </motion.div>
-          ))}
+            );
+          })}
         </div>
       )}
 
@@ -430,6 +494,10 @@ const Services = () => {
               categories={existingCategories}
               value={form.category}
               onChange={(val) => setForm(f => ({ ...f, category: val }))}
+            />
+            <ServiceIconPicker
+              value={form.icon_key}
+              onChange={(iconKey) => setForm(f => ({ ...f, icon_key: iconKey }))}
             />
             <div className="space-y-1.5">
               <Label>Descrição</Label>

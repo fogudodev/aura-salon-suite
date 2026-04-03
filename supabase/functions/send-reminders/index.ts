@@ -278,6 +278,77 @@ serve(async (req) => {
       }, { onConflict: "professional_id,usage_date" });
     }
 
+    const signalStart = new Date(now.getTime() + 19.5 * 60 * 1000).toISOString();
+    const signalEnd = new Date(now.getTime() + 20.5 * 60 * 1000).toISOString();
+
+    const { data: signalBookings } = await supabase
+      .from("bookings")
+      .select("id, professional_id, client_name, start_time, signal_amount, signal_whatsapp_sent_at, signal_check_reminder_sent_at")
+      .gt("signal_amount", 0)
+      .not("signal_whatsapp_sent_at", "is", null)
+      .is("signal_check_reminder_sent_at", null)
+      .in("status", ["pending", "confirmed"])
+      .gte("start_time", signalStart)
+      .lte("start_time", signalEnd);
+
+    for (const booking of signalBookings || []) {
+      const { data: prof } = await supabase
+        .from("professionals")
+        .select("id, name, business_name, phone")
+        .eq("id", booking.professional_id)
+        .single();
+
+      if (!prof?.phone) continue;
+
+      const { data: inst } = await supabase
+        .from("whatsapp_instances")
+        .select("instance_name, status")
+        .eq("professional_id", booking.professional_id)
+        .single();
+
+      if (!inst || inst.status !== "connected") continue;
+
+      const startDate = new Date(booking.start_time);
+      const formattedDate = startDate.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric" });
+      const formattedTime = startDate.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+      const message = `Atenção! A cliente ${booking.client_name || "Cliente"} tem atendimento em ${formattedDate} às ${formattedTime}. Confira no WhatsApp e na conta do banco se o sinal de ${Number(booking.signal_amount || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })} foi recebido.`;
+      const recipientPhone = normalizePhone(prof.phone);
+
+      const sendRes = await fetch(`${EVOLUTION_URL}/message/sendText/${inst.instance_name}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", apikey: EVOLUTION_KEY },
+        body: JSON.stringify({ number: recipientPhone, text: message }),
+      });
+
+      let sendData: any = {};
+      if (sendRes.ok) {
+        sendData = await sendRes.json();
+      } else {
+        sendData = await sendRes.json().catch(() => ({}));
+      }
+
+      await supabase.from("whatsapp_logs").insert({
+        professional_id: booking.professional_id,
+        automation_id: null,
+        booking_id: booking.id,
+        recipient_phone: recipientPhone,
+        message_content: message,
+        status: sendRes.ok ? "sent" : "failed",
+        sent_at: sendRes.ok ? new Date().toISOString() : null,
+        error_message: sendRes.ok ? null : JSON.stringify(sendData),
+      });
+
+      if (sendRes.ok) {
+        await supabase
+          .from("bookings")
+          .update({ signal_check_reminder_sent_at: new Date().toISOString() } as any)
+          .eq("id", booking.id);
+        results.push({ type: "signal_check_reminder", bookingId: booking.id, success: true });
+      } else {
+        results.push({ type: "signal_check_reminder", bookingId: booking.id, success: false, error: JSON.stringify(sendData) });
+      }
+    }
+
     return new Response(JSON.stringify({ success: true, processed: results.length, results }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
