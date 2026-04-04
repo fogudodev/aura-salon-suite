@@ -144,54 +144,68 @@ function resolveAudioFormat(mimeType?: string | null) {
   return "ogg";
 }
 
-async function getGeminiApiKey() {
-  const key = Deno.env.get("GEMINI_API_KEY");
-  if (!key) throw new Error("GEMINI_API_KEY not configured");
-  return key;
+function base64ToUint8Array(base64: string) {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+
+  return bytes;
 }
 
 async function transcribeAudioBase64(base64Audio: string, mimeType?: string | null) {
   const cleanedBase64 = stripBase64Prefix(base64Audio);
   if (!cleanedBase64) return null;
 
-  const apiKey = await getGeminiApiKey();
-  const transcriptionRes = await fetch("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: "gemini-2.5-flash",
-      messages: [
-        {
-          role: "user",
-          content: [
-            {
-              type: "text",
-              text:
-                "Transcreva o audio a seguir para texto em portugues brasileiro. Retorne apenas a transcricao. Se nao entender, retorne [audio_nao_reconhecido].",
-            },
-            {
-              type: "input_audio",
-              input_audio: {
-                data: cleanedBase64,
-                format: resolveAudioFormat(mimeType),
-              },
-            },
-          ],
-        },
-      ],
-    }),
+  const apiKey = (Deno.env.get("OPENAI_API_KEY") || "").trim();
+  if (!apiKey) throw new Error("OPENAI_API_KEY_NOT_CONFIGURED");
+
+  const openAiBaseUrl = (Deno.env.get("OPENAI_API_BASE_URL") || "https://api.openai.com/v1").replace(/\/$/, "");
+  const model = (Deno.env.get("OPENAI_AUDIO_TRANSCRIPTION_MODEL") || "gpt-4o-mini-transcribe").trim();
+  const audioBytes = base64ToUint8Array(cleanedBase64);
+  const extension = resolveAudioFormat(mimeType);
+  const file = new File([audioBytes], `whatsapp-audio.${extension}`, {
+    type: mimeType || `audio/${extension}`,
   });
+
+  const formData = new FormData();
+  formData.append("file", file);
+  formData.append("model", model);
+  formData.append("language", "pt");
+  formData.append("response_format", "json");
+
+  const controller = new AbortController();
+  const timeoutMs = Number(Deno.env.get("OPENAI_AUDIO_TRANSCRIPTION_TIMEOUT_MS") || "25000");
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  let transcriptionRes: Response;
+  try {
+    transcriptionRes = await fetch(`${openAiBaseUrl}/audio/transcriptions`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: formData,
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new Error("OPENAI_AUDIO_TRANSCRIPTION_TIMEOUT");
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 
   if (!transcriptionRes.ok) {
     const errorText = await transcriptionRes.text();
-    throw new Error(`TRANSCRIPTION_FAILED:${transcriptionRes.status}:${errorText}`);
+    throw new Error(`OPENAI_AUDIO_TRANSCRIPTION_FAILED:${transcriptionRes.status}:${errorText}`);
   }
 
   const transcriptionData = await transcriptionRes.json();
-  const transcription = transcriptionData.choices?.[0]?.message?.content?.trim();
+  const transcription = String(transcriptionData?.text || "").trim();
   if (!transcription || transcription.toLowerCase().includes("[audio_nao_reconhecido]")) {
     return null;
   }
@@ -1137,6 +1151,7 @@ async function transcribeInboundAudio(
         has_evolution_key: !!event.audioKey,
         has_official_media_id: !!event.audioMediaId,
         message_type: event.contentType,
+        transcription_provider: "openai",
       },
     });
 
@@ -1161,6 +1176,7 @@ async function transcribeInboundAudio(
           message_type: event.contentType,
           has_evolution_key: !!event.audioKey,
           has_official_media_id: !!event.audioMediaId,
+          transcription_provider: "openai",
         },
       });
       return null;
@@ -1183,6 +1199,7 @@ async function transcribeInboundAudio(
         mime_type: event.audioMimeType || audioSource.mimeType || null,
         transcription_length: transcription?.length || 0,
         message_type: event.contentType,
+        transcription_provider: "openai",
       },
     });
 
@@ -1207,6 +1224,7 @@ async function transcribeInboundAudio(
         errorMessage,
         details: {
           message_type: event.contentType,
+          transcription_provider: "openai",
         },
       });
     } catch (loggingError) {
@@ -1448,14 +1466,31 @@ serve(async (req) => {
     });
 
     let clientMessage = parsedEvent.text || "";
-    let fallbackReply: string | null = null;
 
     if (parsedEvent.contentType === "audio") {
       const transcription = await transcribeInboundAudio(supabase, parsedEvent, professionalId, conversation.id);
       if (transcription) {
         clientMessage = transcription;
+
+        await insertWhatsAppEventLog(supabase, {
+          professionalId,
+          conversationId: conversation.id,
+          instanceName: String(instance.instance_name || parsedEvent.instanceName || ""),
+          provider: parsedEvent.provider,
+          direction: "system",
+          eventType: "audio_transcription_routed_to_ai",
+          messageId: parsedEvent.messageId,
+          clientIdentifier: parsedEvent.clientIdentifier,
+          normalizedPhone: parsedEvent.normalizedPhone,
+          status: "processing",
+          details: {
+            transcription_provider: "openai",
+            transcription_length: transcription.length,
+            routed_through: "ai_router",
+          },
+        });
       } else {
-        fallbackReply = SAFE_AI_REPLY;
+        return safeResponse({ ignored: "audio_transcription_unavailable" });
       }
     } else if (parsedEvent.contentType === "media") {
       await insertWhatsAppEventLog(supabase, {
@@ -1513,34 +1548,6 @@ serve(async (req) => {
         supabase,
         conversation.id,
         [...messages, { role: "user", content: clientMessage || "[mensagem sem texto]" }, { role: "assistant", content: reply }],
-        context,
-        "active",
-      );
-
-      return safeResponse({ provider: parsedEvent.provider });
-    }
-
-    if (fallbackReply) {
-      const reply = mergeAssistantMessage(welcomePrefix, fallbackReply);
-
-      await sendWhatsAppMessage({
-        supabase,
-        professionalId,
-        recipient: parsedEvent.clientIdentifier,
-        message: reply,
-        instance,
-        conversationId: conversation.id,
-        preferredProvider: parsedEvent.provider,
-        details: {
-          source: "whatsapp_webhook_fallback_reply",
-          content_type: parsedEvent.contentType,
-        },
-      });
-
-      await updateConversation(
-        supabase,
-        conversation.id,
-        [...messages, { role: "user", content: clientMessage || `[${parsedEvent.contentType}]` }, { role: "assistant", content: reply }],
         context,
         "active",
       );
