@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { addDays, format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -24,6 +24,7 @@ type ServiceFavoriteRow = { service_id: string };
 type RpcSuccess = { success?: boolean; error?: string };
 type SlotsRpc = RpcSuccess & { slots?: Slot[] };
 type BookingRpc = RpcSuccess & { booking_id?: string };
+type ClientLookupRpc = RpcSuccess & { found?: boolean; client_name?: string | null };
 
 const money = (value: number) => value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 const cleanPhone = (value: string) => value.replace(/\D/g, "").slice(0, 11);
@@ -44,6 +45,8 @@ const PublicBooking = () => {
   const [step, setStep] = useState(1);
   const [clientName, setClientName] = useState("");
   const [clientPhone, setClientPhone] = useState("");
+  const [clientLookupState, setClientLookupState] = useState<"idle" | "checking" | "recognized" | "new">("idle");
+  const [recognizedClientName, setRecognizedClientName] = useState<string | null>(null);
   const [favoriteIds, setFavoriteIds] = useState<string[]>([]);
   const [serviceIds, setServiceIds] = useState<string[]>([]);
   const [employeeId, setEmployeeId] = useState<string | null>(null);
@@ -58,11 +61,87 @@ const PublicBooking = () => {
   const [pixTimeLeft, setPixTimeLeft] = useState(300);
   const [pixCopied, setPixCopied] = useState(false);
   const [signalConfirmLeft, setSignalConfirmLeft] = useState<number | null>(null);
+  const autofilledClientNameRef = useRef(false);
+  const activeClientLookupKeyRef = useRef("");
+  const lastClientLookupKeyRef = useRef("");
   const accent = professional?.component_color || professional?.primary_color || "#c026d3";
   const bgColor = professional?.bg_color || "#fff1f7";
   const isSalon = professional?.account_type === "salon";
 
   useEffect(() => { const load = async () => { if (!slug) return; const { data: prof, error } = await api.from("professionals").select("id,name,business_name,bio,phone,avatar_url,logo_url,cover_url,primary_color,bg_color,text_color,component_color,slug,account_type,welcome_title,welcome_description,confirmation_message,booking_advance_weeks").eq("slug", slug).single(); if (error || !prof) { setNotFound(true); setLoading(false); return; } const [svc, emp, pay] = await Promise.all([api.from("services").select("*").eq("professional_id", prof.id).eq("active", true).order("sort_order", { ascending: true }), prof.account_type === "salon" ? api.from("salon_employees").select("id,name,specialty,avatar_url").eq("salon_id", prof.id).eq("is_active", true).order("name") : Promise.resolve({ data: [] }), api.rpc("get_public_payment_config", { p_professional_id: prof.id } as Record<string, unknown>)]); let empSvc: { data: { employee_id: string; service_id: string }[] } = { data: [] }; if (prof.account_type === "salon" && emp.data && emp.data.length > 0) { const employeeIds = (emp.data as Employee[]).map((employee) => employee.id); const employeeServicesResponse = await api.from("employee_services").select("employee_id,service_id").in("employee_id", employeeIds); empSvc = { data: (employeeServicesResponse.data || []) as { employee_id: string; service_id: string }[] }; } const payCfg = (pay.data || null) as PaymentConfig | null; setProfessional(prof as Professional); setServices(((svc.data || []) as Service[]).map((service) => ({ ...service, icon_key: service.icon_key || null }))); setEmployees((emp.data || []) as Employee[]); setEmployeeServices((empSvc.data || []) as { employee_id: string; service_id: string }[]); setPaymentConfig(payCfg); setLoading(false); }; load(); }, [slug]);
+
+  useEffect(() => {
+    const phoneDigits = cleanPhone(clientPhone);
+
+    if (!professional?.id) return;
+
+    if (phoneDigits.length < 10) {
+      setClientLookupState("idle");
+      setRecognizedClientName(null);
+      lastClientLookupKeyRef.current = "";
+
+      if (autofilledClientNameRef.current) {
+        setClientName("");
+        autofilledClientNameRef.current = false;
+      }
+
+      return;
+    }
+
+    const lookupKey = `${professional.id}:${phoneDigits}`;
+    if (lookupKey === lastClientLookupKeyRef.current) {
+      return;
+    }
+
+    activeClientLookupKeyRef.current = lookupKey;
+    setClientLookupState("checking");
+    setRecognizedClientName(null);
+
+    const timeoutId = window.setTimeout(async () => {
+      const { data, error } = await api.rpc("get_public_client_by_phone", {
+        p_professional_id: professional.id,
+        p_client_phone: phoneDigits,
+      } as Record<string, unknown>);
+
+      if (activeClientLookupKeyRef.current !== lookupKey) {
+        return;
+      }
+
+      lastClientLookupKeyRef.current = lookupKey;
+
+      if (error) {
+        setClientLookupState("new");
+        if (autofilledClientNameRef.current) {
+          setClientName("");
+          autofilledClientNameRef.current = false;
+        }
+        return;
+      }
+
+      const result = (data || {}) as ClientLookupRpc;
+      if (result.success !== false && result.found && result.client_name?.trim()) {
+        const name = result.client_name.trim();
+        setRecognizedClientName(name);
+        setClientLookupState("recognized");
+        setClientName(name);
+        autofilledClientNameRef.current = true;
+        return;
+      }
+
+      setRecognizedClientName(null);
+      setClientLookupState("new");
+
+      if (autofilledClientNameRef.current) {
+        setClientName("");
+        autofilledClientNameRef.current = false;
+      }
+    }, 350);
+
+    return () => {
+      activeClientLookupKeyRef.current = "";
+      window.clearTimeout(timeoutId);
+    };
+  }, [clientPhone, professional?.id]);
 
   useEffect(() => { const loadFavorites = async () => { if (!professional?.id || cleanPhone(clientPhone).length < 10) { setFavoriteIds([]); return; } const { data } = await api.rpc("get_public_client_service_favorites", { p_professional_id: professional.id, p_client_phone: cleanPhone(clientPhone) } as Record<string, unknown>); setFavoriteIds(((data || []) as ServiceFavoriteRow[]).map((item) => item.service_id)); }; loadFavorites(); }, [clientPhone, professional?.id]);
   useEffect(() => { if (!signalScreen || pixTimeLeft <= 0) return; const id = window.setInterval(() => setPixTimeLeft((value) => (value <= 1 ? 0 : value - 1)), 1000); return () => window.clearInterval(id); }, [signalScreen, pixTimeLeft]);
@@ -89,7 +168,7 @@ const PublicBooking = () => {
   const toggleFavorite = async (serviceId: string) => { if (!professional?.id || !clientName.trim() || cleanPhone(clientPhone).length < 10) { toast.error("Preencha nome e WhatsApp antes de favoritar."); return; } const { data } = await api.rpc("toggle_public_service_favorite", { p_professional_id: professional.id, p_client_name: clientName.trim(), p_client_phone: cleanPhone(clientPhone), p_service_id: serviceId } as Record<string, unknown>); const result = (data || {}) as RpcSuccess & { favorited?: boolean }; if (result.success) setFavoriteIds((current) => result.favorited ? [...current, serviceId] : current.filter((id) => id !== serviceId)); };
   const submitBooking = async () => { if (!professional?.id || !slot) return; if (!serviceIds.length) return toast.error("Selecione ao menos um serviço."); if (cleanPhone(clientPhone).length < 10) return toast.error("WhatsApp inválido."); setSubmitting(true); const payload = { p_professional_id: professional.id, p_service_ids: serviceIds, p_start_time: slot.start_time, p_client_name: clientName.trim(), p_client_phone: cleanPhone(clientPhone), p_employee_id: employeeId || null, p_requires_signal: needsSignal, p_signal_amount: signalAmount }; console.log("PAYLOAD BOOKING:", payload); const { data, error } = await api.rpc("create_public_booking_v2", payload); setSubmitting(false); if (error) { console.error(error); return toast.error("Erro na requisição."); } const result = data as BookingRpc; if (!result?.success) return toast.error(result?.error || "Erro ao criar agendamento."); setBookingId(result.booking_id || null); if (needsSignal) { setPixTimeLeft(300); setSignalScreen(true); toast.success("Pague o sinal para reservar a vaga."); return; } setConfirmed(true); toast.success("Agendamento confirmado."); };
   const onSignalPaid = async () => { if (!bookingId) return; await api.rpc("mark_public_signal_payment_sent", { p_booking_id: bookingId } as Record<string, unknown>); if (whatsappLink) window.open(whatsappLink, "_blank", "noopener,noreferrer"); setSignalConfirmLeft(40); toast.success("Envie o comprovante no WhatsApp. A reserva será confirmada em instantes."); };
-  const resetAll = () => { setStep(1); setClientName(""); setClientPhone(""); setFavoriteIds([]); setServiceIds([]); setEmployeeId(null); setSelectedDate(null); setSlot(null); setSlots([]); setBookingId(null); setSignalScreen(false); setConfirmed(false); setPixTimeLeft(300); setSignalConfirmLeft(null); };
+  const resetAll = () => { setStep(1); setClientName(""); setClientPhone(""); setClientLookupState("idle"); setRecognizedClientName(null); setFavoriteIds([]); setServiceIds([]); setEmployeeId(null); setSelectedDate(null); setSlot(null); setSlots([]); setBookingId(null); setSignalScreen(false); setConfirmed(false); setPixTimeLeft(300); setSignalConfirmLeft(null); autofilledClientNameRef.current = false; activeClientLookupKeyRef.current = ""; lastClientLookupKeyRef.current = ""; };
 
   const bookingDateLabel = slot ? format(new Date(slot.start_time), "dd 'de' MMMM", { locale: ptBR }) : "-";
   const bookingDateShortLabel = slot ? format(new Date(slot.start_time), "dd/MM/yyyy") : "-";
@@ -97,7 +176,9 @@ const PublicBooking = () => {
   const professionalLabel = selectedEmployee?.name || professional?.name || "-";
   const greetingTitle = professional?.welcome_title || professional?.business_name || professional?.name || "";
   const greetingDescription = professional?.welcome_description || professional?.bio || "Agende seu horário em poucos passos com uma experiência simples e mobile.";
-  const canMoveFromStep1 = clientName.trim().length > 0 && cleanPhone(clientPhone).length >= 10;
+  const isRecognizedClient = clientLookupState === "recognized";
+  const showNameField = clientLookupState === "new";
+  const canMoveFromStep1 = cleanPhone(clientPhone).length >= 10 && clientLookupState !== "checking" && (isRecognizedClient || clientName.trim().length >= 2);
 
   if (loading) return <CenteredState><div className="flex h-16 w-16 items-center justify-center rounded-full bg-white shadow-lg"><Loader2 className="h-7 w-7 animate-spin text-[#bc2b98]" /></div></CenteredState>;
   if (notFound || !professional) return <CenteredState><div className="rounded-[30px] bg-white px-8 py-10 text-center shadow-[0_26px_70px_-28px_rgba(15,23,42,0.4)]"><p className="text-[11px] font-semibold uppercase tracking-[0.32em] text-[#c671b4]">Link indisponível</p><h1 className="mt-3 text-2xl font-black text-slate-900">Página não encontrada</h1><p className="mt-3 text-sm leading-6 text-slate-500">O link público deste profissional não está disponível no momento.</p></div></CenteredState>;
@@ -166,18 +247,18 @@ const PublicBooking = () => {
 
               {step === 1 ? (
                 <div className="pt-5">
-                  <SectionIntro eyebrow="Etapa 1" title="Antes de começar" subtitle="Informe seu nome e WhatsApp para continuar o agendamento." />
-                  <ClientForm clientName={clientName} clientPhone={clientPhone} onClientNameChange={setClientName} onClientPhoneChange={(value) => setClientPhone(maskPhone(value))} />
+                  <SectionIntro eyebrow="Etapa 1" title="Antes de começar" subtitle="Informe seu WhatsApp para continuar o agendamento." />
+                  <ClientForm clientName={clientName} clientPhone={clientPhone} checkingClient={clientLookupState === "checking"} isRecognizedClient={isRecognizedClient} recognizedClientName={recognizedClientName} showNameField={showNameField} onClientNameChange={(value) => setClientName(value)} onClientPhoneChange={(value) => { setClientPhone(maskPhone(value)); activeClientLookupKeyRef.current = ""; lastClientLookupKeyRef.current = ""; }} />
                   <div className="mt-5 rounded-[26px] bg-[#fff6fb] p-4 shadow-[0_18px_40px_-28px_rgba(190,24,93,0.34)]">
                     <div className="flex items-start gap-3">
                       <div className="mt-0.5 flex h-10 w-10 items-center justify-center rounded-full bg-white text-[#bc2b98] shadow-sm"><Sparkles size={18} /></div>
                       <div>
-                        <p className="text-[13px] font-bold text-slate-900">Experiência rápida no celular</p>
-                        <p className="mt-1 text-[13px] leading-5 text-slate-500">Seus dados ajudam a salvar favoritos e agilizam os próximos agendamentos.</p>
+                        <p className="text-[13px] font-bold text-slate-900">Fluxo rápido e inteligente</p>
+                        <p className="mt-1 text-[13px] leading-5 text-slate-500">Primeiro verificamos seu WhatsApp. Se você já tiver cadastro, seguimos mais rápido.</p>
                       </div>
                     </div>
                   </div>
-                  <PrimaryAction accent={accent} className="mt-6" onClick={() => { if (!canMoveFromStep1) { toast.error("Preencha nome e WhatsApp para continuar."); return; } setStep(2); }}>Escolher serviços</PrimaryAction>
+                  <PrimaryAction accent={accent} className="mt-6" onClick={() => { if (!canMoveFromStep1) { toast.error(showNameField ? "Preencha seu nome para continuar." : "Informe um WhatsApp válido para continuar."); return; } setStep(2); }}>Escolher serviços</PrimaryAction>
                 </div>
               ) : null}
 
@@ -305,7 +386,7 @@ function GradientHeader({ title, onBack }: { title: string; onBack?: () => void 
       <div className="flex items-center justify-between gap-3">
         <button type="button" onClick={onBack} className={cn("flex h-10 w-10 items-center justify-center rounded-full bg-white/12 transition", onBack ? "opacity-100" : "pointer-events-none opacity-0")}><ArrowLeft size={18} /></button>
         <div className="text-center">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.34em] text-white/70">Aura Salon</p>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.34em] text-white/70">App Gende</p>
           <h1 className="mt-2 text-[18px] font-black uppercase tracking-[0.08em]">{title}</h1>
         </div>
         <div className="h-10 w-10" />

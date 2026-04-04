@@ -1,9 +1,14 @@
 import type { InputHTMLAttributes } from "react";
+import { Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 type ClientFormProps = {
   clientName: string;
   clientPhone: string;
+  checkingClient: boolean;
+  isRecognizedClient: boolean;
+  recognizedClientName: string | null;
+  showNameField: boolean;
   onClientNameChange: (value: string) => void;
   onClientPhoneChange: (value: string) => void;
 };
@@ -39,17 +44,15 @@ function AppInput({ label, value, placeholder, onChange, inputMode }: AppInputPr
 export function ClientForm({
   clientName,
   clientPhone,
+  checkingClient,
+  isRecognizedClient,
+  recognizedClientName,
+  showNameField,
   onClientNameChange,
   onClientPhoneChange,
 }: ClientFormProps) {
   return (
     <div className="space-y-5">
-      <AppInput
-        label="Nome"
-        value={clientName}
-        placeholder="Como devemos te chamar?"
-        onChange={onClientNameChange}
-      />
       <AppInput
         label="WhatsApp"
         value={clientPhone}
@@ -57,6 +60,39 @@ export function ClientForm({
         inputMode="tel"
         onChange={onClientPhoneChange}
       />
+
+      {checkingClient ? (
+        <div className="flex items-center gap-3 rounded-[24px] border border-[#efe0ec] bg-white px-4 py-4 text-[13px] text-slate-500 shadow-[0_16px_32px_-24px_rgba(15,23,42,0.25)]">
+          <Loader2 className="h-4 w-4 animate-spin text-[#bc2b98]" />
+          <span>Procurando seu cadastro...</span>
+        </div>
+      ) : null}
+
+      {isRecognizedClient && recognizedClientName ? (
+        <div className="rounded-[24px] bg-[#fff6fb] px-4 py-4 shadow-[0_18px_36px_-26px_rgba(190,24,93,0.35)]">
+          <p className="text-[16px] font-bold text-slate-900">
+            Bem-vindo de volta, {recognizedClientName}!
+          </p>
+          <p className="mt-1 text-[13px] leading-5 text-slate-500">
+            Encontramos seu cadastro e vamos agilizar seu atendimento.
+          </p>
+        </div>
+      ) : null}
+
+      {showNameField ? (
+        <AppInput
+          label="Nome"
+          value={clientName}
+          placeholder="Como devemos te chamar?"
+          onChange={onClientNameChange}
+        />
+      ) : null}
+
+      {!checkingClient && !isRecognizedClient && !showNameField ? (
+        <p className="text-[12px] leading-5 text-slate-400">
+          Digite um WhatsApp válido para verificar se já existe um cadastro.
+        </p>
+      ) : null}
     </div>
   );
 }
