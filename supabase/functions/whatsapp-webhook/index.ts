@@ -67,6 +67,16 @@ function json(data: unknown, status = 200) {
   });
 }
 
+// Provider webhooks must always receive 200 on POST to avoid retry storms.
+function safeResponse(payload: Record<string, unknown> = {}) {
+  return new Response(JSON.stringify({ ok: true, ...payload }), {
+    status: 200,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
+}
+
+const SAFE_AI_REPLY = "Recebi sua mensagem 💬 Já já te respondo!";
+
 function getSupabaseAdmin() {
   return createClient(
     Deno.env.get("SUPABASE_URL") ?? "",
@@ -190,6 +200,15 @@ async function transcribeAudioBase64(base64Audio: string, mimeType?: string | nu
 }
 
 async function fetchEvolutionAudioBase64(instanceName: string, audioKey: Record<string, unknown>) {
+  if (!instanceName) {
+    console.warn("Evolution audio skipped: empty instance name");
+    return null;
+  }
+  if (!audioKey || Object.keys(audioKey).length === 0) {
+    console.warn("Evolution audio skipped: missing audio key");
+    return null;
+  }
+
   const evolution = getEvolutionConfig();
   if (!evolution) throw new Error("EVOLUTION_API_NOT_CONFIGURED");
 
@@ -216,7 +235,10 @@ async function fetchEvolutionAudioBase64(instanceName: string, audioKey: Record<
     mediaData?.base_64 ||
     "";
 
-  if (!base64) throw new Error("EVOLUTION_AUDIO_BASE64_EMPTY");
+  if (!base64) {
+    console.warn("Evolution audio skipped: empty base64 payload");
+    return null;
+  }
 
   return {
     base64,
@@ -229,6 +251,11 @@ async function fetchEvolutionAudioBase64(instanceName: string, audioKey: Record<
 }
 
 async function fetchOfficialAudioBase64(mediaId: string) {
+  if (!mediaId) {
+    console.warn("Audio sem URL, ignorando");
+    return null;
+  }
+
   const token = getOfficialToken();
   if (!token) throw new Error("OFFICIAL_TOKEN_NOT_CONFIGURED");
 
@@ -245,7 +272,17 @@ async function fetchOfficialAudioBase64(mediaId: string) {
 
   const metadata = await metadataRes.json();
   const downloadUrl = metadata?.url;
-  if (!downloadUrl) throw new Error("OFFICIAL_AUDIO_DOWNLOAD_URL_EMPTY");
+  if (!downloadUrl || typeof downloadUrl !== "string") {
+    console.warn("Audio sem URL, ignorando");
+    return null;
+  }
+
+  try {
+    new URL(downloadUrl);
+  } catch {
+    console.warn("Audio com URL inválida, ignorando");
+    return null;
+  }
 
   const downloadRes = await fetch(downloadUrl, {
     headers: {
@@ -1084,47 +1121,154 @@ async function transcribeInboundAudio(
   professionalId: string,
   conversationId?: string,
 ) {
-  await insertWhatsAppEventLog(supabase, {
-    professionalId,
-    conversationId,
-    instanceName: event.instanceName,
-    provider: event.provider,
-    direction: "inbound",
-    eventType: "audio_transcription_started",
-    messageId: event.messageId,
-    clientIdentifier: event.clientIdentifier,
-    normalizedPhone: event.normalizedPhone,
-    status: "processing",
-    details: {
-      has_evolution_key: !!event.audioKey,
-      has_official_media_id: !!event.audioMediaId,
-    },
-  });
+  try {
+    await insertWhatsAppEventLog(supabase, {
+      professionalId,
+      conversationId,
+      instanceName: event.instanceName,
+      provider: event.provider,
+      direction: "inbound",
+      eventType: "audio_transcription_started",
+      messageId: event.messageId,
+      clientIdentifier: event.clientIdentifier,
+      normalizedPhone: event.normalizedPhone,
+      status: "processing",
+      details: {
+        has_evolution_key: !!event.audioKey,
+        has_official_media_id: !!event.audioMediaId,
+        message_type: event.contentType,
+      },
+    });
 
-  const audioSource = event.provider === "evolution"
-    ? await fetchEvolutionAudioBase64(event.instanceName || "", event.audioKey || {})
-    : await fetchOfficialAudioBase64(event.audioMediaId || "");
+    const audioSource = event.provider === "evolution"
+      ? await fetchEvolutionAudioBase64(event.instanceName || "", event.audioKey || {})
+      : await fetchOfficialAudioBase64(event.audioMediaId || "");
 
-  const transcription = await transcribeAudioBase64(audioSource.base64, event.audioMimeType || audioSource.mimeType);
+    if (!audioSource?.base64) {
+      await insertWhatsAppEventLog(supabase, {
+        professionalId,
+        conversationId,
+        instanceName: event.instanceName,
+        provider: event.provider,
+        direction: "inbound",
+        eventType: "audio_missing_source",
+        messageId: event.messageId,
+        clientIdentifier: event.clientIdentifier,
+        normalizedPhone: event.normalizedPhone,
+        status: "ignored",
+        errorCode: "AUDIO_SOURCE_MISSING",
+        details: {
+          message_type: event.contentType,
+          has_evolution_key: !!event.audioKey,
+          has_official_media_id: !!event.audioMediaId,
+        },
+      });
+      return null;
+    }
 
-  await insertWhatsAppEventLog(supabase, {
-    professionalId,
-    conversationId,
-    instanceName: event.instanceName,
-    provider: event.provider,
-    direction: "inbound",
-    eventType: transcription ? "audio_transcription_succeeded" : "audio_transcription_unrecognized",
-    messageId: event.messageId,
-    clientIdentifier: event.clientIdentifier,
-    normalizedPhone: event.normalizedPhone,
-    status: transcription ? "processed" : "warning",
-    details: {
-      mime_type: event.audioMimeType || audioSource.mimeType || null,
-      transcription_length: transcription?.length || 0,
-    },
-  });
+    const transcription = await transcribeAudioBase64(audioSource.base64, event.audioMimeType || audioSource.mimeType);
 
-  return transcription;
+    await insertWhatsAppEventLog(supabase, {
+      professionalId,
+      conversationId,
+      instanceName: event.instanceName,
+      provider: event.provider,
+      direction: "inbound",
+      eventType: transcription ? "audio_transcription_succeeded" : "audio_transcription_unrecognized",
+      messageId: event.messageId,
+      clientIdentifier: event.clientIdentifier,
+      normalizedPhone: event.normalizedPhone,
+      status: transcription ? "processed" : "warning",
+      details: {
+        mime_type: event.audioMimeType || audioSource.mimeType || null,
+        transcription_length: transcription?.length || 0,
+        message_type: event.contentType,
+      },
+    });
+
+    return transcription;
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error("Audio transcription failed", error);
+
+    await insertWhatsAppEventLog(supabase, {
+      professionalId,
+      conversationId,
+      instanceName: event.instanceName,
+      provider: event.provider,
+      direction: "inbound",
+      eventType: "audio_transcription_failed",
+      messageId: event.messageId,
+      clientIdentifier: event.clientIdentifier,
+      normalizedPhone: event.normalizedPhone,
+      status: "failed",
+      errorCode: "AUDIO_TRANSCRIPTION_FAILED",
+      errorMessage,
+      details: {
+        message_type: event.contentType,
+      },
+    });
+
+    return null;
+  }
+}
+
+async function safeGenerateWebhookAIResponse(params: {
+  supabase: SupabaseClient;
+  professionalId: string;
+  message: string;
+  context: {
+    useCase: "whatsapp_reply";
+    systemPrompt: string;
+    messages: Array<{ role: "system" | "user" | "assistant"; content: string }>;
+    conversationId: string;
+    instanceName: string;
+    messageId: string;
+    clientIdentifier: string;
+    normalizedPhone: string;
+    selectedService?: string | null;
+    selectedDate?: string | null;
+    selectedTime?: string | null;
+  };
+}) {
+  try {
+    return await generateAIResponse({
+      professionalId: params.professionalId,
+      message: params.message,
+      context: params.context,
+    });
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error("AI failed", error);
+
+    await insertWhatsAppEventLog(params.supabase, {
+      professionalId: params.professionalId,
+      conversationId: params.context.conversationId,
+      instanceName: params.context.instanceName,
+      provider: "safe_response",
+      model: "safe_response",
+      direction: "system",
+      eventType: "ai_request_failed",
+      messageId: params.context.messageId,
+      clientIdentifier: params.context.clientIdentifier,
+      normalizedPhone: params.context.normalizedPhone,
+      status: "failed",
+      errorCode: "AI_GENERATION_FAILED",
+      errorMessage,
+      fallbackUsed: true,
+      details: {
+        use_case: params.context.useCase,
+      },
+    });
+
+    return {
+      text: SAFE_AI_REPLY,
+      provider: "safe_response",
+      model: "safe_response",
+      latency_ms: 0,
+      fallback_used: true,
+    };
+  }
 }
 
 serve(async (req) => {
@@ -1152,7 +1296,12 @@ serve(async (req) => {
     const body = await req.json();
 
     if (body.action === "send-follow-up") {
-      return await handleFollowUp(supabase, body);
+      try {
+        await handleFollowUp(supabase, body);
+      } catch (error) {
+        console.error("send-follow-up failed:", error);
+      }
+      return safeResponse({ action: "send-follow-up" });
     }
 
     const parsedEvent = parseInboundEvent(body);
@@ -1170,7 +1319,7 @@ serve(async (req) => {
           },
         });
       }
-      return json({ success: true, ignored: parsedEvent.reason });
+      return safeResponse({ ignored: parsedEvent.reason });
     }
 
     if (parsedEvent.kind === "connection") {
@@ -1188,7 +1337,7 @@ serve(async (req) => {
         details: parsedEvent.details || {},
       });
 
-      return json({ success: true, connection: parsedEvent.status });
+      return safeResponse({ connection: parsedEvent.status });
     }
 
     const instance = await resolveInstance(supabase, parsedEvent);
@@ -1207,7 +1356,7 @@ serve(async (req) => {
         },
       });
 
-      return json({ success: false, error: "Instance not found" }, 404);
+      return safeResponse({ ignored: "instance_not_found" });
     }
 
     const professionalId = String(instance.professional_id);
@@ -1228,7 +1377,7 @@ serve(async (req) => {
     });
 
     if (!inboundAccepted) {
-      return json({ success: true, duplicate: true });
+      return safeResponse({ duplicate: true });
     }
 
     const { data: professional } = await supabase
@@ -1250,7 +1399,7 @@ serve(async (req) => {
         status: "ignored",
       });
 
-      return json({ success: true, ignored: "feature_disabled" });
+      return safeResponse({ ignored: "feature_disabled" });
     }
 
     const { data: services } = await supabase
@@ -1294,14 +1443,15 @@ serve(async (req) => {
     let fallbackReply: string | null = null;
 
     if (parsedEvent.contentType === "audio") {
-      try {
-        const transcription = await transcribeInboundAudio(supabase, parsedEvent, professionalId, conversation.id);
-        if (transcription) {
-          clientMessage = transcription;
-        } else {
+      const transcription = await transcribeInboundAudio(supabase, parsedEvent, professionalId, conversation.id);
+      if (transcription) {
+        clientMessage = transcription;
+      } else {
+        fallbackReply = SAFE_AI_REPLY;
+      }
+/*
           fallbackReply = "Não consegui entender esse áudio. Pode me enviar em texto ou um áudio mais curto?";
         }
-      } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
         await insertWhatsAppEventLog(supabase, {
           professionalId,
@@ -1318,8 +1468,29 @@ serve(async (req) => {
         });
         fallbackReply = "Tive um problema para transcrever o seu áudio. Pode me enviar a mensagem em texto?";
       }
+*/
     } else if (parsedEvent.contentType === "media") {
+      await insertWhatsAppEventLog(supabase, {
+        professionalId,
+        conversationId: conversation.id,
+        instanceName: String(instance.instance_name || parsedEvent.instanceName || ""),
+        provider: parsedEvent.provider,
+        direction: "inbound",
+        eventType: "unsupported_message_type",
+        messageId: parsedEvent.messageId,
+        clientIdentifier: parsedEvent.clientIdentifier,
+        normalizedPhone: parsedEvent.normalizedPhone,
+        status: "ignored",
+        errorCode: "UNSUPPORTED_MESSAGE_TYPE",
+        details: {
+          content_type: parsedEvent.contentType,
+        },
+      });
+
+      return safeResponse({ ignored: "unsupported_message_type" });
+/*
       fallbackReply = "Recebi sua mídia. Para continuar o atendimento, me envie uma mensagem de texto ou um áudio.";
+*/
     }
 
     const messages = Array.isArray(conversation.messages) ? [...conversation.messages] : [];
@@ -1361,7 +1532,7 @@ serve(async (req) => {
         "active",
       );
 
-      return json({ success: true, provider: parsedEvent.provider });
+      return safeResponse({ provider: parsedEvent.provider });
     }
 
     if (fallbackReply) {
@@ -1389,11 +1560,11 @@ serve(async (req) => {
         "active",
       );
 
-      return json({ success: true, provider: parsedEvent.provider });
+      return safeResponse({ provider: parsedEvent.provider });
     }
 
     if (!clientMessage.trim()) {
-      return json({ success: true, ignored: "empty_message" });
+      return safeResponse({ ignored: "empty_message" });
     }
 
     messages.push({ role: "user", content: clientMessage });
@@ -1437,70 +1608,25 @@ serve(async (req) => {
       output_tokens?: number;
       fallback_used: boolean;
     } | null = null;
-    try {
-      aiMetadata = await generateAIResponse({
-        professionalId,
-        message: clientMessage,
-        context: {
-          useCase: "whatsapp_reply",
-          systemPrompt,
-          messages: messages.map((message) => ({ role: message.role, content: message.content })),
-          conversationId: conversation.id,
-          instanceName: String(instance.instance_name || parsedEvent.instanceName || ""),
-          messageId: parsedEvent.messageId,
-          clientIdentifier: parsedEvent.clientIdentifier,
-          normalizedPhone: parsedEvent.normalizedPhone,
-          selectedService: typeof updatedContext.selected_service === "string" ? updatedContext.selected_service : null,
-          selectedDate: typeof updatedContext.selected_date === "string" ? updatedContext.selected_date : null,
-          selectedTime: typeof updatedContext.selected_time === "string" ? updatedContext.selected_time : null,
-        },
-      });
-      aiResponse = aiMetadata.text;
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-
-      await insertWhatsAppEventLog(supabase, {
-        professionalId,
+    aiMetadata = await safeGenerateWebhookAIResponse({
+      supabase,
+      professionalId,
+      message: clientMessage,
+      context: {
+        useCase: "whatsapp_reply",
+        systemPrompt,
+        messages: messages.map((message) => ({ role: message.role, content: message.content })),
         conversationId: conversation.id,
         instanceName: String(instance.instance_name || parsedEvent.instanceName || ""),
-        provider: parsedEvent.provider,
-        direction: "system",
-        eventType: "ai_request_failed",
         messageId: parsedEvent.messageId,
         clientIdentifier: parsedEvent.clientIdentifier,
         normalizedPhone: parsedEvent.normalizedPhone,
-        status: "failed",
-        errorMessage,
-      });
-
-      const fallbackAiReply = mergeAssistantMessage(
-        welcomePrefix,
-        "Tive um problema interno para responder agora. Pode me mandar novamente em instantes?",
-      );
-
-      await sendWhatsAppMessage({
-        supabase,
-        professionalId,
-        recipient: parsedEvent.clientIdentifier,
-        message: fallbackAiReply,
-        instance,
-        conversationId: conversation.id,
-        preferredProvider: parsedEvent.provider,
-        details: {
-          source: "whatsapp_webhook_ai_failure",
-        },
-      });
-
-      await updateConversation(
-        supabase,
-        conversation.id,
-        [...messages, { role: "assistant", content: fallbackAiReply }],
-        updatedContext,
-        "active",
-      );
-
-      return json({ success: true, provider: parsedEvent.provider });
-    }
+        selectedService: typeof updatedContext.selected_service === "string" ? updatedContext.selected_service : null,
+        selectedDate: typeof updatedContext.selected_date === "string" ? updatedContext.selected_date : null,
+        selectedTime: typeof updatedContext.selected_time === "string" ? updatedContext.selected_time : null,
+      },
+    });
+    aiResponse = aiMetadata.text;
 
     let bookingMatch = aiResponse.match(/\|\|\|BOOKING\|\|\|(.+?)\|\|\|END\|\|\|/);
 
@@ -1514,7 +1640,8 @@ serve(async (req) => {
         bookingLink,
         workingHours as Array<Record<string, unknown>> | null,
       );
-      aiMetadata = await generateAIResponse({
+      aiMetadata = await safeGenerateWebhookAIResponse({
+        supabase,
         professionalId,
         message: clientMessage,
         context: {
@@ -1584,7 +1711,7 @@ serve(async (req) => {
         "active",
       );
 
-      return json({ success: true, provider: parsedEvent.provider });
+      return safeResponse({ provider: parsedEvent.provider });
     }
 
     try {
@@ -1659,7 +1786,7 @@ serve(async (req) => {
           "active",
         );
 
-        return json({ success: true, provider: parsedEvent.provider });
+        return safeResponse({ provider: parsedEvent.provider });
       }
 
       const friendlyMessage = aiResponse.replace(/\|\|\|BOOKING\|\|\|.+?\|\|\|END\|\|\|/, "").trim();
@@ -1730,7 +1857,7 @@ serve(async (req) => {
         conversation.id,
       );
 
-      return json({ success: true, provider: parsedEvent.provider, bookingId: bookingResult.booking_id });
+      return safeResponse({ provider: parsedEvent.provider, bookingId: bookingResult.booking_id });
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       const reply = mergeAssistantMessage(
@@ -1773,10 +1900,10 @@ serve(async (req) => {
         "active",
       );
 
-      return json({ success: true, provider: parsedEvent.provider });
+      return safeResponse({ provider: parsedEvent.provider });
     }
   } catch (error) {
     console.error("whatsapp-webhook error:", error);
-    return json({ error: error instanceof Error ? error.message : String(error) }, 500);
+    return safeResponse();
   }
 });

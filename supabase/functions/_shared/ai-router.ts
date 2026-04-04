@@ -120,12 +120,30 @@ function firstDayOfMonthIso() {
 function getDefaultSettings(professionalId: string): AIProviderSettingsRow {
   return {
     professional_id: professionalId,
-    primary_provider: "gemini",
-    primary_model: MODEL_CATALOG.gemini.strong,
+    primary_provider: "openai",
+    primary_model: MODEL_CATALOG.openai.strong,
     fallback_provider: "groq",
     fallback_model: MODEL_CATALOG.groq.cheap,
     monthly_budget_cents: 0,
     hard_stop_on_budget: false,
+  };
+}
+
+function normalizeSettings(settings: AIProviderSettingsRow): AIProviderSettingsRow {
+  const primaryProvider = settings.primary_provider === "gemini" || !settings.primary_provider
+    ? "openai"
+    : settings.primary_provider;
+
+  const fallbackProvider = !settings.fallback_provider || settings.fallback_provider === "gemini"
+    ? "groq"
+    : settings.fallback_provider;
+
+  return {
+    ...settings,
+    primary_provider: primaryProvider,
+    primary_model: settings.primary_model || MODEL_CATALOG[primaryProvider].strong,
+    fallback_provider: fallbackProvider,
+    fallback_model: settings.fallback_model || MODEL_CATALOG[fallbackProvider].cheap,
   };
 }
 
@@ -141,7 +159,7 @@ async function readProviderSettings(supabase: SupabaseClient, professionalId: st
     return getDefaultSettings(professionalId);
   }
 
-  return (data as AIProviderSettingsRow | null) || getDefaultSettings(professionalId);
+  return normalizeSettings((data as AIProviderSettingsRow | null) || getDefaultSettings(professionalId));
 }
 
 async function readMonthlySpendCents(supabase: SupabaseClient, professionalId: string) {
@@ -198,8 +216,9 @@ function buildMessages(params: GenerateAIResponseParams) {
 
 // Primary + fallback provider order per professional, filtered by available credentials.
 function buildProviderPlan(settings: AIProviderSettingsRow, tier: RoutingTier): ProviderPlan[] {
-  const primaryProvider = settings.primary_provider || "gemini";
-  const fallbackProvider = settings.fallback_provider || (primaryProvider === "gemini" ? "groq" : "gemini");
+  const primaryProvider = settings.primary_provider || "openai";
+  const fallbackProvider = settings.fallback_provider || "groq";
+  const tertiaryProvider: AIProviderName = "gemini";
 
   const primaryModel = tier === "cheap"
     ? MODEL_CATALOG[primaryProvider].cheap
@@ -212,6 +231,7 @@ function buildProviderPlan(settings: AIProviderSettingsRow, tier: RoutingTier): 
   return [
     { provider: primaryProvider, model: primaryModel },
     { provider: fallbackProvider, model: fallbackModel },
+    { provider: tertiaryProvider, model: MODEL_CATALOG[tertiaryProvider][tier === "premium" ? "premium" : tier === "strong" ? "strong" : "cheap"] },
   ].filter((plan, index, list) =>
     !!plan.model &&
     hasKeyForProvider(plan.provider) &&
@@ -297,34 +317,14 @@ function sanitizeResponseText(text: string) {
 
 // Central AI orchestration entrypoint used by Edge Functions.
 export async function generateAIResponse(params: GenerateAIResponseParams): Promise<GenerateAIResponseResult> {
-  const supabase = getSupabaseAdmin();
-  const context = params.context || {};
-  const tier = classifyMessageTier(params);
-  const settings = await readProviderSettings(supabase, params.professionalId);
-  const monthlySpendCents = await readMonthlySpendCents(supabase, params.professionalId);
-  const budgetCents = Number(settings.monthly_budget_cents || 0) || 0;
+  try {
+    const supabase = getSupabaseAdmin();
+    const context = params.context || {};
+    const tier = classifyMessageTier(params);
+    const settings = await readProviderSettings(supabase, params.professionalId);
+    const monthlySpendCents = await readMonthlySpendCents(supabase, params.professionalId);
+    const budgetCents = Number(settings.monthly_budget_cents || 0) || 0;
 
-  await insertWhatsAppEventLog(supabase, {
-    professionalId: params.professionalId,
-    conversationId: context.conversationId || null,
-    automationId: context.automationId || null,
-    bookingId: context.bookingId || null,
-    instanceName: context.instanceName || null,
-    direction: "system",
-    eventType: "ai_request_started",
-    messageId: context.messageId || null,
-    clientIdentifier: context.clientIdentifier || null,
-    normalizedPhone: context.normalizedPhone || null,
-    status: "processing",
-    details: {
-      use_case: context.useCase || "default",
-      routing_tier: tier,
-      monthly_spend_cents: monthlySpendCents,
-      monthly_budget_cents: budgetCents,
-    },
-  });
-
-  if (budgetCents > 0 && monthlySpendCents >= budgetCents && settings.hard_stop_on_budget) {
     await insertWhatsAppEventLog(supabase, {
       professionalId: params.professionalId,
       conversationId: context.conversationId || null,
@@ -332,71 +332,92 @@ export async function generateAIResponse(params: GenerateAIResponseParams): Prom
       bookingId: context.bookingId || null,
       instanceName: context.instanceName || null,
       direction: "system",
-      eventType: "ai_budget_blocked",
+      eventType: "ai_request_started",
       messageId: context.messageId || null,
       clientIdentifier: context.clientIdentifier || null,
       normalizedPhone: context.normalizedPhone || null,
-      status: "blocked",
-      provider: "budget_guard",
-      model: "safe_response",
-      estimatedCost: 0,
-      fallbackUsed: false,
-      errorCode: "AI_BUDGET_EXCEEDED",
+      status: "processing",
       details: {
+        use_case: context.useCase || "default",
+        routing_tier: tier,
         monthly_spend_cents: monthlySpendCents,
         monthly_budget_cents: budgetCents,
       },
     });
 
-    return {
-      text: SAFE_RESPONSE,
-      provider: "budget_guard",
-      model: "safe_response",
-      latency_ms: 0,
-      fallback_used: false,
-    };
-  }
-
-  const plans = buildProviderPlan(settings, budgetCents > 0 && monthlySpendCents >= budgetCents ? "cheap" : tier);
-  const messages = buildMessages(params);
-  let totalLatency = 0;
-  const attemptedProviders: ProviderPlan[] = [];
-
-  for (let planIndex = 0; planIndex < plans.length; planIndex += 1) {
-    const plan = plans[planIndex];
-    const circuit = await readCircuitBreaker(supabase, params.professionalId, plan.provider);
-
-    if (isCircuitOpen(circuit)) {
+    if (budgetCents > 0 && monthlySpendCents >= budgetCents && settings.hard_stop_on_budget) {
       await insertWhatsAppEventLog(supabase, {
         professionalId: params.professionalId,
         conversationId: context.conversationId || null,
         automationId: context.automationId || null,
         bookingId: context.bookingId || null,
         instanceName: context.instanceName || null,
-        provider: plan.provider,
         direction: "system",
-        eventType: "ai_provider_circuit_open",
+        eventType: "ai_budget_blocked",
         messageId: context.messageId || null,
         clientIdentifier: context.clientIdentifier || null,
         normalizedPhone: context.normalizedPhone || null,
-        status: "skipped",
-        model: plan.model,
-        fallbackUsed: planIndex > 0,
-        errorCode: "AI_CIRCUIT_OPEN",
+        status: "blocked",
+        provider: "budget_guard",
+        model: "safe_response",
+        estimatedCost: 0,
+        fallbackUsed: false,
+        errorCode: "AI_BUDGET_EXCEEDED",
         details: {
-          circuit_open_until: circuit?.circuit_open_until || null,
+          monthly_spend_cents: monthlySpendCents,
+          monthly_budget_cents: budgetCents,
         },
       });
-      continue;
+
+      return {
+        text: SAFE_RESPONSE,
+        provider: "budget_guard",
+        model: "safe_response",
+        latency_ms: 0,
+        fallback_used: false,
+      };
     }
 
-    attemptedProviders.push(plan);
+    const plans = buildProviderPlan(settings, budgetCents > 0 && monthlySpendCents >= budgetCents ? "cheap" : tier);
+    const messages = buildMessages(params);
+    let totalLatency = 0;
+    const attemptedProviders: ProviderPlan[] = [];
 
-    for (let attempt = 0; attempt <= MAX_RETRIES_PER_PROVIDER; attempt += 1) {
+    for (let planIndex = 0; planIndex < plans.length; planIndex += 1) {
+      const plan = plans[planIndex];
+      const circuit = await readCircuitBreaker(supabase, params.professionalId, plan.provider);
+
+      if (isCircuitOpen(circuit)) {
+        await insertWhatsAppEventLog(supabase, {
+          professionalId: params.professionalId,
+          conversationId: context.conversationId || null,
+          automationId: context.automationId || null,
+          bookingId: context.bookingId || null,
+          instanceName: context.instanceName || null,
+          provider: plan.provider,
+          direction: "system",
+          eventType: "ai_provider_circuit_open",
+          messageId: context.messageId || null,
+          clientIdentifier: context.clientIdentifier || null,
+          normalizedPhone: context.normalizedPhone || null,
+          status: "skipped",
+          model: plan.model,
+          fallbackUsed: planIndex > 0,
+          errorCode: "AI_CIRCUIT_OPEN",
+          details: {
+            circuit_open_until: circuit?.circuit_open_until || null,
+          },
+        });
+        continue;
+      }
+
+      attemptedProviders.push(plan);
+
+      for (let attempt = 0; attempt <= MAX_RETRIES_PER_PROVIDER; attempt += 1) {
       const attemptNumber = attempt + 1;
       const startedAt = Date.now();
 
-      await insertWhatsAppEventLog(supabase, {
+        await insertWhatsAppEventLog(supabase, {
         professionalId: params.professionalId,
         conversationId: context.conversationId || null,
         automationId: context.automationId || null,
@@ -418,20 +439,20 @@ export async function generateAIResponse(params: GenerateAIResponseParams): Prom
         },
       });
 
-      try {
-        const providerResult: AIProviderCallSuccess = await callProviderByName(plan.provider, {
+        try {
+          const providerResult: AIProviderCallSuccess = await callProviderByName(plan.provider, {
           model: plan.model,
           messages,
           temperature: context.temperature ?? 0.3,
           maxTokens: context.maxTokens,
         });
 
-        totalLatency += providerResult.latencyMs;
-        const estimatedCost = estimateCostCents(plan.provider, providerResult.model, providerResult.inputTokens, providerResult.outputTokens);
+          totalLatency += providerResult.latencyMs;
+          const estimatedCost = estimateCostCents(plan.provider, providerResult.model, providerResult.inputTokens, providerResult.outputTokens);
 
-        await markProviderSuccess(supabase, params.professionalId, plan.provider);
+          await markProviderSuccess(supabase, params.professionalId, plan.provider);
 
-        await insertWhatsAppEventLog(supabase, {
+          await insertWhatsAppEventLog(supabase, {
           professionalId: params.professionalId,
           conversationId: context.conversationId || null,
           automationId: context.automationId || null,
@@ -457,23 +478,23 @@ export async function generateAIResponse(params: GenerateAIResponseParams): Prom
           },
         });
 
-        return {
-          text: sanitizeResponseText(providerResult.text),
-          provider: providerResult.provider,
-          model: providerResult.model,
-          latency_ms: totalLatency || providerResult.latencyMs,
-          input_tokens: providerResult.inputTokens,
-          output_tokens: providerResult.outputTokens,
-          fallback_used: planIndex > 0,
-        };
-      } catch (rawError) {
-        const error = rawError as AIProviderCallError;
-        const latencyMs = Date.now() - startedAt;
-        totalLatency += latencyMs;
+          return {
+            text: sanitizeResponseText(providerResult.text),
+            provider: providerResult.provider,
+            model: providerResult.model,
+            latency_ms: totalLatency || providerResult.latencyMs,
+            input_tokens: providerResult.inputTokens,
+            output_tokens: providerResult.outputTokens,
+            fallback_used: planIndex > 0,
+          };
+        } catch (rawError) {
+          const error = rawError as AIProviderCallError;
+          const latencyMs = Date.now() - startedAt;
+          totalLatency += latencyMs;
 
-        await markProviderFailure(supabase, params.professionalId, plan.provider, String(error.errorCode || error.statusCode || "AI_PROVIDER_ERROR"));
+          await markProviderFailure(supabase, params.professionalId, plan.provider, String(error.errorCode || error.statusCode || "AI_PROVIDER_ERROR"));
 
-        await insertWhatsAppEventLog(supabase, {
+          await insertWhatsAppEventLog(supabase, {
           professionalId: params.professionalId,
           conversationId: context.conversationId || null,
           automationId: context.automationId || null,
@@ -498,10 +519,10 @@ export async function generateAIResponse(params: GenerateAIResponseParams): Prom
           },
         });
 
-        if (attempt < MAX_RETRIES_PER_PROVIDER && isRetryableError(error)) {
-          const backoffMs = BASE_RETRY_DELAY_MS * 2 ** attempt;
+          if (attempt < MAX_RETRIES_PER_PROVIDER && isRetryableError(error)) {
+            const backoffMs = BASE_RETRY_DELAY_MS * 2 ** attempt;
 
-          await insertWhatsAppEventLog(supabase, {
+            await insertWhatsAppEventLog(supabase, {
             professionalId: params.professionalId,
             conversationId: context.conversationId || null,
             automationId: context.automationId || null,
@@ -523,43 +544,79 @@ export async function generateAIResponse(params: GenerateAIResponseParams): Prom
             },
           });
 
-          await sleep(backoffMs);
-          continue;
-        }
+            await sleep(backoffMs);
+            continue;
+          }
 
-        break;
+          break;
+        }
       }
     }
+    
+
+    await insertWhatsAppEventLog(supabase, {
+      professionalId: params.professionalId,
+      conversationId: context.conversationId || null,
+      automationId: context.automationId || null,
+      bookingId: context.bookingId || null,
+      instanceName: context.instanceName || null,
+      direction: "system",
+      eventType: "ai_safe_response_returned",
+      messageId: context.messageId || null,
+      clientIdentifier: context.clientIdentifier || null,
+      normalizedPhone: context.normalizedPhone || null,
+      status: "fallback",
+      provider: attemptedProviders.at(-1)?.provider || "safe_response",
+      model: attemptedProviders.at(-1)?.model || "safe_response",
+      latencyMs: totalLatency,
+      estimatedCost: 0,
+      fallbackUsed: attemptedProviders.length > 1,
+      errorCode: "AI_ALL_PROVIDERS_FAILED",
+      details: {
+        attempted_providers: attemptedProviders.map((plan) => ({ provider: plan.provider, model: plan.model })),
+      },
+    });
+
+    return {
+      text: SAFE_RESPONSE,
+      provider: attemptedProviders.at(-1)?.provider || "safe_response",
+      model: attemptedProviders.at(-1)?.model || "safe_response",
+      latency_ms: totalLatency,
+      fallback_used: attemptedProviders.length > 1,
+    };
+  } catch (error) {
+    console.error("generateAIResponse failed:", error);
+
+    try {
+      const supabase = getSupabaseAdmin();
+      const context = params.context || {};
+      await insertWhatsAppEventLog(supabase, {
+        professionalId: params.professionalId,
+        conversationId: context.conversationId || null,
+        automationId: context.automationId || null,
+        bookingId: context.bookingId || null,
+        instanceName: context.instanceName || null,
+        direction: "system",
+        eventType: "ai_router_exception",
+        messageId: context.messageId || null,
+        clientIdentifier: context.clientIdentifier || null,
+        normalizedPhone: context.normalizedPhone || null,
+        status: "failed",
+        provider: "safe_response",
+        model: "safe_response",
+        errorCode: "AI_ROUTER_EXCEPTION",
+        errorMessage: error instanceof Error ? error.message : String(error),
+      });
+    } catch (loggingError) {
+      console.error("generateAIResponse logging failed:", loggingError);
+    }
+
+    return {
+      text: SAFE_RESPONSE,
+      provider: "safe_response",
+      model: "safe_response",
+      latency_ms: 0,
+      fallback_used: true,
+    };
   }
-
-  await insertWhatsAppEventLog(supabase, {
-    professionalId: params.professionalId,
-    conversationId: context.conversationId || null,
-    automationId: context.automationId || null,
-    bookingId: context.bookingId || null,
-    instanceName: context.instanceName || null,
-    direction: "system",
-    eventType: "ai_safe_response_returned",
-    messageId: context.messageId || null,
-    clientIdentifier: context.clientIdentifier || null,
-    normalizedPhone: context.normalizedPhone || null,
-    status: "fallback",
-    provider: attemptedProviders.at(-1)?.provider || "safe_response",
-    model: attemptedProviders.at(-1)?.model || "safe_response",
-    latencyMs: totalLatency,
-    estimatedCost: 0,
-    fallbackUsed: attemptedProviders.length > 1,
-    errorCode: "AI_ALL_PROVIDERS_FAILED",
-    details: {
-      attempted_providers: attemptedProviders.map((plan) => ({ provider: plan.provider, model: plan.model })),
-    },
-  });
-
-  return {
-    text: SAFE_RESPONSE,
-    provider: attemptedProviders.at(-1)?.provider || "safe_response",
-    model: attemptedProviders.at(-1)?.model || "safe_response",
-    latency_ms: totalLatency,
-    fallback_used: attemptedProviders.length > 1,
-  };
 }
