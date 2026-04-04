@@ -1,0 +1,147 @@
+import type { AIProviderCallError, AIProviderCallInput, AIProviderCallSuccess } from "../ai-types.ts";
+
+const GROQ_BASE_URL = (Deno.env.get("GROQ_API_BASE_URL") || "https://api.groq.com/openai/v1").replace(/\/$/, "");
+
+function getApiKey() {
+  return (Deno.env.get("GROQ_API_KEY") || "").trim();
+}
+
+function makeError(params: {
+  message: string;
+  model: string;
+  statusCode?: number;
+  errorCode?: string;
+  retryable?: boolean;
+  responseBody?: unknown;
+}): AIProviderCallError {
+  const error = new Error(params.message) as AIProviderCallError;
+  error.provider = "groq";
+  error.model = params.model;
+  error.statusCode = params.statusCode;
+  error.errorCode = params.errorCode;
+  error.retryable = params.retryable;
+  error.responseBody = params.responseBody;
+  return error;
+}
+
+function isRetryableStatus(status?: number) {
+  return status === 408 || status === 409 || status === 425 || status === 429 || (status !== undefined && status >= 500);
+}
+
+function extractText(payload: Record<string, unknown>) {
+  const choices = Array.isArray(payload.choices) ? payload.choices as Array<Record<string, unknown>> : [];
+  const firstChoice = choices[0] || {};
+  const message = (firstChoice.message || {}) as Record<string, unknown>;
+  const content = message.content;
+
+  if (typeof content === "string") return content.trim();
+
+  if (Array.isArray(content)) {
+    return content
+      .map((part) => (typeof part?.text === "string" ? part.text : ""))
+      .filter(Boolean)
+      .join("\n")
+      .trim();
+  }
+
+  return "";
+}
+
+// Groq OpenAI-compatible adapter.
+export async function callProvider(input: AIProviderCallInput): Promise<AIProviderCallSuccess> {
+  const apiKey = getApiKey();
+  if (!apiKey) {
+    throw makeError({
+      message: "GROQ_API_KEY_NOT_CONFIGURED",
+      model: input.model,
+      errorCode: "GROQ_API_KEY_NOT_CONFIGURED",
+      retryable: false,
+    });
+  }
+
+  const startedAt = Date.now();
+  const controller = new AbortController();
+  const timeoutMs = input.timeoutMs ?? 14000;
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(`${GROQ_BASE_URL}/chat/completions`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      signal: controller.signal,
+      body: JSON.stringify({
+        model: input.model,
+        messages: input.messages,
+        temperature: input.temperature,
+        max_tokens: input.maxTokens,
+      }),
+    });
+
+    const rawText = await response.text();
+    let payload: Record<string, unknown> = {};
+    try {
+      payload = rawText ? JSON.parse(rawText) : {};
+    } catch {
+      payload = { raw: rawText };
+    }
+
+    if (!response.ok) {
+      const errorPayload = ((payload.error || {}) as Record<string, unknown>);
+      throw makeError({
+        message: `GROQ_HTTP_${response.status}`,
+        model: input.model,
+        statusCode: response.status,
+        errorCode: String(errorPayload.code || errorPayload.type || `HTTP_${response.status}`),
+        retryable: isRetryableStatus(response.status),
+        responseBody: payload,
+      });
+    }
+
+    const text = extractText(payload);
+    if (!text) {
+      throw makeError({
+        message: "GROQ_EMPTY_RESPONSE",
+        model: input.model,
+        statusCode: response.status,
+        errorCode: "GROQ_EMPTY_RESPONSE",
+        retryable: false,
+        responseBody: payload,
+      });
+    }
+
+    const usage = (payload.usage || {}) as Record<string, unknown>;
+
+    return {
+      provider: "groq",
+      model: input.model,
+      text,
+      latencyMs: Date.now() - startedAt,
+      inputTokens: Number(usage.prompt_tokens || usage.input_tokens || 0) || undefined,
+      outputTokens: Number(usage.completion_tokens || usage.output_tokens || 0) || undefined,
+      raw: payload,
+    };
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw makeError({
+        message: "GROQ_TIMEOUT",
+        model: input.model,
+        errorCode: "GROQ_TIMEOUT",
+        retryable: true,
+      });
+    }
+
+    if ((error as AIProviderCallError)?.provider === "groq") throw error;
+
+    throw makeError({
+      message: error instanceof Error ? error.message : String(error),
+      model: input.model,
+      errorCode: "GROQ_UNKNOWN_ERROR",
+      retryable: true,
+    });
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}

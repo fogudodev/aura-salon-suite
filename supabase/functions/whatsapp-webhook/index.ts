@@ -9,6 +9,7 @@ import {
   sendWhatsAppMessage,
   type WhatsappProvider,
 } from "../_shared/whatsapp.ts";
+import { generateAIResponse } from "../_shared/ai-router.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -186,32 +187,6 @@ async function transcribeAudioBase64(base64Audio: string, mimeType?: string | nu
   }
 
   return transcription;
-}
-
-async function getAIResponse(
-  conversationMessages: Array<{ role: string; content: string }>,
-  systemPrompt: string,
-) {
-  const apiKey = await getGeminiApiKey();
-  const res = await fetch("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: "gemini-2.0-flash",
-      messages: [{ role: "system", content: systemPrompt }, ...conversationMessages],
-    }),
-  });
-
-  if (!res.ok) {
-    const errorText = await res.text();
-    throw new Error(`AI_ERROR:${res.status}:${errorText}`);
-  }
-
-  const data = await res.json();
-  return data.choices?.[0]?.message?.content?.trim() || "Desculpe, não entendi. Pode repetir?";
 }
 
 async function fetchEvolutionAudioBase64(instanceName: string, audioKey: Record<string, unknown>) {
@@ -1431,7 +1406,7 @@ serve(async (req) => {
       instanceName: String(instance.instance_name || parsedEvent.instanceName || ""),
       provider: parsedEvent.provider,
       direction: "system",
-      eventType: "ai_request_started",
+      eventType: "ai_context_prepared",
       messageId: parsedEvent.messageId,
       clientIdentifier: parsedEvent.clientIdentifier,
       normalizedPhone: parsedEvent.normalizedPhone,
@@ -1454,11 +1429,33 @@ serve(async (req) => {
     );
 
     let aiResponse = "";
+    let aiMetadata: {
+      provider: string;
+      model: string;
+      latency_ms: number;
+      input_tokens?: number;
+      output_tokens?: number;
+      fallback_used: boolean;
+    } | null = null;
     try {
-      aiResponse = await getAIResponse(
-        messages.map((message) => ({ role: message.role, content: message.content })),
-        systemPrompt,
-      );
+      aiMetadata = await generateAIResponse({
+        professionalId,
+        message: clientMessage,
+        context: {
+          useCase: "whatsapp_reply",
+          systemPrompt,
+          messages: messages.map((message) => ({ role: message.role, content: message.content })),
+          conversationId: conversation.id,
+          instanceName: String(instance.instance_name || parsedEvent.instanceName || ""),
+          messageId: parsedEvent.messageId,
+          clientIdentifier: parsedEvent.clientIdentifier,
+          normalizedPhone: parsedEvent.normalizedPhone,
+          selectedService: typeof updatedContext.selected_service === "string" ? updatedContext.selected_service : null,
+          selectedDate: typeof updatedContext.selected_date === "string" ? updatedContext.selected_date : null,
+          selectedTime: typeof updatedContext.selected_time === "string" ? updatedContext.selected_time : null,
+        },
+      });
+      aiResponse = aiMetadata.text;
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
 
@@ -1517,10 +1514,24 @@ serve(async (req) => {
         bookingLink,
         workingHours as Array<Record<string, unknown>> | null,
       );
-      aiResponse = await getAIResponse(
-        messages.map((message) => ({ role: message.role, content: message.content })),
-        promptWithSlots,
-      );
+      aiMetadata = await generateAIResponse({
+        professionalId,
+        message: clientMessage,
+        context: {
+          useCase: "whatsapp_reply",
+          systemPrompt: promptWithSlots,
+          messages: messages.map((message) => ({ role: message.role, content: message.content })),
+          conversationId: conversation.id,
+          instanceName: String(instance.instance_name || parsedEvent.instanceName || ""),
+          messageId: parsedEvent.messageId,
+          clientIdentifier: parsedEvent.clientIdentifier,
+          normalizedPhone: parsedEvent.normalizedPhone,
+          selectedService: typeof updatedContext.selected_service === "string" ? updatedContext.selected_service : null,
+          selectedDate: typeof updatedContext.selected_date === "string" ? updatedContext.selected_date : null,
+          selectedTime: typeof updatedContext.selected_time === "string" ? updatedContext.selected_time : null,
+        },
+      });
+      aiResponse = aiMetadata.text;
       bookingMatch = aiResponse.match(/\|\|\|BOOKING\|\|\|(.+?)\|\|\|END\|\|\|/);
     }
 
@@ -1528,15 +1539,21 @@ serve(async (req) => {
       professionalId,
       conversationId: conversation.id,
       instanceName: String(instance.instance_name || parsedEvent.instanceName || ""),
-      provider: parsedEvent.provider,
+      provider: aiMetadata?.provider || "unknown",
       direction: "system",
       eventType: bookingMatch ? "ai_booking_intent_detected" : "ai_response_ready",
       messageId: parsedEvent.messageId,
       clientIdentifier: parsedEvent.clientIdentifier,
       normalizedPhone: parsedEvent.normalizedPhone,
       status: "processed",
+      model: aiMetadata?.model || null,
+      latencyMs: aiMetadata?.latency_ms || null,
+      inputTokens: aiMetadata?.input_tokens || null,
+      outputTokens: aiMetadata?.output_tokens || null,
+      fallbackUsed: aiMetadata?.fallback_used || false,
       details: {
         response_length: aiResponse.length,
+        ai_provider: aiMetadata?.provider || null,
       },
     });
 

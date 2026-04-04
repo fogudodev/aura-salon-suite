@@ -1,10 +1,29 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "npm:@supabase/supabase-js@2.57.2";
+import { generateAIResponse } from "../_shared/ai-router.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
+
+function parseJsonArrayResponse(value: string) {
+  const trimmed = value.trim();
+  const candidates = [trimmed];
+  const jsonMatch = trimmed.match(/\[[\s\S]*\]/);
+  if (jsonMatch) candidates.push(jsonMatch[0]);
+
+  for (const candidate of candidates) {
+    try {
+      const parsed = JSON.parse(candidate);
+      if (Array.isArray(parsed)) return parsed;
+    } catch {
+      // ignore malformed candidate
+    }
+  }
+
+  return [];
+}
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
@@ -83,14 +102,6 @@ serve(async (req) => {
         });
       }
 
-      // Use AI to pick best upsell
-      const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
-      if (!GEMINI_API_KEY) {
-        return new Response(JSON.stringify({ suggestions: [] }), {
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-
       const prompt = `Você é um especialista em vendas de salão de beleza. O cliente agendou "${sourceService.name}" (R$ ${sourceService.price}).
 
 Serviços disponíveis para sugerir:
@@ -101,66 +112,26 @@ Selecione até 2 serviços que complementam melhor o serviço agendado. Para cad
 Responda APENAS com um JSON array:
 [{"service_id": "uuid", "message": "frase de upsell"}]`;
 
-      const aiRes = await fetch("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${GEMINI_API_KEY}`,
-          "Content-Type": "application/json",
+      const aiResult = await generateAIResponse({
+        professionalId,
+        message: prompt,
+        context: {
+          useCase: "upsell",
+          systemPrompt: "Responda apenas com JSON válido. Não use markdown. Não explique.",
+          maxTokens: 300,
+          temperature: 0.2,
         },
-        body: JSON.stringify({
-          model: "gemini-2.5-flash",
-          messages: [{ role: "user", content: prompt }],
-          tools: [{
-            type: "function",
-            function: {
-              name: "suggest_upsell",
-              description: "Return upsell suggestions",
-              parameters: {
-                type: "object",
-                properties: {
-                  suggestions: {
-                    type: "array",
-                    items: {
-                      type: "object",
-                      properties: {
-                        service_id: { type: "string" },
-                        message: { type: "string" },
-                      },
-                      required: ["service_id", "message"],
-                    },
-                  },
-                },
-                required: ["suggestions"],
-              },
-            },
-          }],
-          tool_choice: { type: "function", function: { name: "suggest_upsell" } },
-        }),
       });
 
-      if (!aiRes.ok) {
-        return new Response(JSON.stringify({ suggestions: [] }), {
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-
-      const aiData = await aiRes.json();
-      const toolCall = aiData.choices?.[0]?.message?.tool_calls?.[0];
-      let aiSuggestions: any[] = [];
-      if (toolCall?.function?.arguments) {
-        try {
-          const parsed = JSON.parse(toolCall.function.arguments);
-          aiSuggestions = parsed.suggestions || [];
-        } catch { /* ignore */ }
-      }
+      const aiSuggestions = parseJsonArrayResponse(aiResult.text) as Array<{ service_id?: string; message?: string }>;
 
       const enriched = aiSuggestions
-        .map((s: any) => {
+        .map((s) => {
           const svc = services.find(sv => sv.id === s.service_id);
           if (!svc) return null;
           return {
             service: svc,
-            promo_message: s.message,
+            promo_message: s.message || "",
             promo_price: null,
           };
         })
@@ -172,7 +143,7 @@ Responda APENAS com um JSON array:
     }
 
     // Map rules to suggestions
-    const suggestions = rules.map((r: any) => ({
+    const suggestions = rules.map((r: { recommended: unknown; promo_message: string | null; promo_price: number | null }) => ({
       service: r.recommended,
       promo_message: r.promo_message,
       promo_price: r.promo_price,

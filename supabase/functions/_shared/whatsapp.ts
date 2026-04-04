@@ -16,12 +16,19 @@ type EventLogInput = {
   bookingId?: string | null;
   instanceName?: string | null;
   provider?: string | null;
+  model?: string | null;
   direction?: string;
   eventType: string;
   messageId?: string | null;
   clientIdentifier?: string | null;
   normalizedPhone?: string | null;
   status?: string;
+  latencyMs?: number | null;
+  inputTokens?: number | null;
+  outputTokens?: number | null;
+  estimatedCost?: number | null;
+  fallbackUsed?: boolean | null;
+  errorCode?: string | null;
   details?: Record<string, unknown>;
   errorMessage?: string | null;
 };
@@ -131,12 +138,19 @@ export async function insertWhatsAppEventLog(
       booking_id: input.bookingId ?? null,
       instance_name: input.instanceName ?? null,
       provider: input.provider ?? "unknown",
+      model: input.model ?? null,
       direction: input.direction ?? "system",
       event_type: input.eventType,
       message_id: input.messageId ?? null,
       client_identifier: input.clientIdentifier ?? null,
       normalized_phone: input.normalizedPhone ?? null,
       status: input.status ?? "info",
+      latency_ms: input.latencyMs ?? null,
+      input_tokens: input.inputTokens ?? null,
+      output_tokens: input.outputTokens ?? null,
+      estimated_cost: input.estimatedCost ?? null,
+      fallback_used: input.fallbackUsed ?? null,
+      error_code: input.errorCode ?? null,
       details: input.details ?? {},
       error_message: input.errorMessage ?? null,
     } as never);
@@ -161,12 +175,19 @@ export async function markInboundMessageReceived(
       booking_id: input.bookingId ?? null,
       instance_name: input.instanceName ?? null,
       provider: input.provider,
+      model: input.model ?? null,
       direction: input.direction ?? "inbound",
       event_type: input.eventType,
       message_id: input.messageId,
       client_identifier: input.clientIdentifier ?? null,
       normalized_phone: input.normalizedPhone ?? null,
       status: input.status ?? "received",
+      latency_ms: input.latencyMs ?? null,
+      input_tokens: input.inputTokens ?? null,
+      output_tokens: input.outputTokens ?? null,
+      estimated_cost: input.estimatedCost ?? null,
+      fallback_used: input.fallbackUsed ?? null,
+      error_code: input.errorCode ?? null,
       details: input.details ?? {},
       error_message: input.errorMessage ?? null,
     } as never);
@@ -495,4 +516,3 @@ export async function sendWhatsAppMessage(
     error: lastError || "No provider available",
   };
 }
-
