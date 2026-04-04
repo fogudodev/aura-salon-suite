@@ -155,21 +155,88 @@ function base64ToUint8Array(base64: string) {
   return bytes;
 }
 
-async function transcribeAudioBase64(base64Audio: string, mimeType?: string | null) {
+type AudioTranscriptionProvider = "openai" | "groq";
+
+type AudioTranscriptionResult = {
+  text: string;
+  provider: AudioTranscriptionProvider;
+  model: string;
+};
+
+type AudioTranscriptionError = Error & {
+  provider?: AudioTranscriptionProvider;
+  model?: string;
+  statusCode?: number;
+  errorCode?: string;
+  retryable?: boolean;
+};
+
+function makeAudioTranscriptionError(params: {
+  provider: AudioTranscriptionProvider;
+  model: string;
+  message: string;
+  statusCode?: number;
+  errorCode?: string;
+  retryable?: boolean;
+}) {
+  const error = new Error(params.message) as AudioTranscriptionError;
+  error.provider = params.provider;
+  error.model = params.model;
+  error.statusCode = params.statusCode;
+  error.errorCode = params.errorCode;
+  error.retryable = params.retryable;
+  return error;
+}
+
+function isRetryableAudioStatus(status?: number) {
+  return status === 408 || status === 409 || status === 425 || status === 429 || (status !== undefined && status >= 500);
+}
+
+function createAudioFile(base64Audio: string, mimeType?: string | null) {
   const cleanedBase64 = stripBase64Prefix(base64Audio);
   if (!cleanedBase64) return null;
 
+  const format = resolveAudioFormat(mimeType);
+  const bytes = base64ToUint8Array(cleanedBase64);
+
+  return new File([bytes], `whatsapp-audio.${format}`, {
+    type: mimeType || `audio/${format}`,
+  });
+}
+
+function isOpenAITranscriptionFormatSupported(mimeType?: string | null) {
+  const format = resolveAudioFormat(mimeType);
+  return format === "wav" || format === "mp3";
+}
+
+async function transcribeWithOpenAI(base64Audio: string, mimeType?: string | null): Promise<AudioTranscriptionResult | null> {
   const apiKey = (Deno.env.get("OPENAI_API_KEY") || "").trim();
-  if (!apiKey) throw new Error("OPENAI_API_KEY_NOT_CONFIGURED");
+  const model = (Deno.env.get("OPENAI_AUDIO_TRANSCRIPTION_MODEL") || "gpt-4o-mini-transcribe").trim();
+
+  if (!apiKey) {
+    throw makeAudioTranscriptionError({
+      provider: "openai",
+      model,
+      message: "OPENAI_API_KEY_NOT_CONFIGURED",
+      errorCode: "OPENAI_API_KEY_NOT_CONFIGURED",
+      retryable: false,
+    });
+  }
+
+  if (!isOpenAITranscriptionFormatSupported(mimeType)) {
+    throw makeAudioTranscriptionError({
+      provider: "openai",
+      model,
+      message: `OPENAI_AUDIO_UNSUPPORTED_FORMAT:${mimeType || "unknown"}`,
+      errorCode: "OPENAI_AUDIO_UNSUPPORTED_FORMAT",
+      retryable: false,
+    });
+  }
+
+  const file = createAudioFile(base64Audio, mimeType);
+  if (!file) return null;
 
   const openAiBaseUrl = (Deno.env.get("OPENAI_API_BASE_URL") || "https://api.openai.com/v1").replace(/\/$/, "");
-  const model = (Deno.env.get("OPENAI_AUDIO_TRANSCRIPTION_MODEL") || "gpt-4o-mini-transcribe").trim();
-  const audioBytes = base64ToUint8Array(cleanedBase64);
-  const extension = resolveAudioFormat(mimeType);
-  const file = new File([audioBytes], `whatsapp-audio.${extension}`, {
-    type: mimeType || `audio/${extension}`,
-  });
-
   const formData = new FormData();
   formData.append("file", file);
   formData.append("model", model);
@@ -180,9 +247,8 @@ async function transcribeAudioBase64(base64Audio: string, mimeType?: string | nu
   const timeoutMs = Number(Deno.env.get("OPENAI_AUDIO_TRANSCRIPTION_TIMEOUT_MS") || "25000");
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
-  let transcriptionRes: Response;
   try {
-    transcriptionRes = await fetch(`${openAiBaseUrl}/audio/transcriptions`, {
+    const response = await fetch(`${openAiBaseUrl}/audio/transcriptions`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${apiKey}`,
@@ -190,27 +256,153 @@ async function transcribeAudioBase64(base64Audio: string, mimeType?: string | nu
       body: formData,
       signal: controller.signal,
     });
+
+    const rawText = await response.text();
+    let payload: Record<string, unknown> = {};
+    try {
+      payload = rawText ? JSON.parse(rawText) : {};
+    } catch {
+      payload = { raw: rawText };
+    }
+
+    if (!response.ok) {
+      const errorPayload = ((payload.error || {}) as Record<string, unknown>);
+      throw makeAudioTranscriptionError({
+        provider: "openai",
+        model,
+        message: `OPENAI_AUDIO_TRANSCRIPTION_FAILED:${response.status}`,
+        statusCode: response.status,
+        errorCode: String(errorPayload.code || errorPayload.type || `HTTP_${response.status}`),
+        retryable: isRetryableAudioStatus(response.status),
+      });
+    }
+
+    const transcription = String(payload.text || "").trim();
+    if (!transcription || transcription.toLowerCase().includes("[audio_nao_reconhecido]")) {
+      return null;
+    }
+
+    return {
+      text: transcription,
+      provider: "openai",
+      model,
+    };
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") {
-      throw new Error("OPENAI_AUDIO_TRANSCRIPTION_TIMEOUT");
+      throw makeAudioTranscriptionError({
+        provider: "openai",
+        model,
+        message: "OPENAI_AUDIO_TRANSCRIPTION_TIMEOUT",
+        errorCode: "OPENAI_AUDIO_TRANSCRIPTION_TIMEOUT",
+        retryable: true,
+      });
     }
-    throw error;
+
+    if ((error as AudioTranscriptionError)?.provider === "openai") throw error;
+
+    throw makeAudioTranscriptionError({
+      provider: "openai",
+      model,
+      message: error instanceof Error ? error.message : String(error),
+      errorCode: "OPENAI_AUDIO_TRANSCRIPTION_UNKNOWN_ERROR",
+      retryable: true,
+    });
   } finally {
     clearTimeout(timeoutId);
   }
+}
 
-  if (!transcriptionRes.ok) {
-    const errorText = await transcriptionRes.text();
-    throw new Error(`OPENAI_AUDIO_TRANSCRIPTION_FAILED:${transcriptionRes.status}:${errorText}`);
+async function transcribeWithGroq(base64Audio: string, mimeType?: string | null): Promise<AudioTranscriptionResult | null> {
+  const apiKey = (Deno.env.get("GROQ_API_KEY") || "").trim();
+  const model = (Deno.env.get("GROQ_AUDIO_TRANSCRIPTION_MODEL") || "whisper-large-v3-turbo").trim();
+
+  if (!apiKey) {
+    throw makeAudioTranscriptionError({
+      provider: "groq",
+      model,
+      message: "GROQ_API_KEY_NOT_CONFIGURED",
+      errorCode: "GROQ_API_KEY_NOT_CONFIGURED",
+      retryable: false,
+    });
   }
 
-  const transcriptionData = await transcriptionRes.json();
-  const transcription = String(transcriptionData?.text || "").trim();
-  if (!transcription || transcription.toLowerCase().includes("[audio_nao_reconhecido]")) {
-    return null;
-  }
+  const file = createAudioFile(base64Audio, mimeType);
+  if (!file) return null;
 
-  return transcription;
+  const groqBaseUrl = (Deno.env.get("GROQ_API_BASE_URL") || "https://api.groq.com/openai/v1").replace(/\/$/, "");
+  const formData = new FormData();
+  formData.append("file", file);
+  formData.append("model", model);
+  formData.append("language", "pt");
+  formData.append("response_format", "json");
+
+  const controller = new AbortController();
+  const timeoutMs = Number(Deno.env.get("GROQ_AUDIO_TRANSCRIPTION_TIMEOUT_MS") || "25000");
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(`${groqBaseUrl}/audio/transcriptions`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: formData,
+      signal: controller.signal,
+    });
+
+    const rawText = await response.text();
+    let payload: Record<string, unknown> = {};
+    try {
+      payload = rawText ? JSON.parse(rawText) : {};
+    } catch {
+      payload = { raw: rawText };
+    }
+
+    if (!response.ok) {
+      const errorPayload = ((payload.error || {}) as Record<string, unknown>);
+      throw makeAudioTranscriptionError({
+        provider: "groq",
+        model,
+        message: `GROQ_AUDIO_TRANSCRIPTION_FAILED:${response.status}`,
+        statusCode: response.status,
+        errorCode: String(errorPayload.code || errorPayload.type || `HTTP_${response.status}`),
+        retryable: isRetryableAudioStatus(response.status),
+      });
+    }
+
+    const transcription = String(payload.text || "").trim();
+    if (!transcription || transcription.toLowerCase().includes("[audio_nao_reconhecido]")) {
+      return null;
+    }
+
+    return {
+      text: transcription,
+      provider: "groq",
+      model,
+    };
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw makeAudioTranscriptionError({
+        provider: "groq",
+        model,
+        message: "GROQ_AUDIO_TRANSCRIPTION_TIMEOUT",
+        errorCode: "GROQ_AUDIO_TRANSCRIPTION_TIMEOUT",
+        retryable: true,
+      });
+    }
+
+    if ((error as AudioTranscriptionError)?.provider === "groq") throw error;
+
+    throw makeAudioTranscriptionError({
+      provider: "groq",
+      model,
+      message: error instanceof Error ? error.message : String(error),
+      errorCode: "GROQ_AUDIO_TRANSCRIPTION_UNKNOWN_ERROR",
+      retryable: true,
+    });
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 async function fetchEvolutionAudioBase64(instanceName: string, audioKey: Record<string, unknown>) {
@@ -1151,7 +1343,7 @@ async function transcribeInboundAudio(
         has_evolution_key: !!event.audioKey,
         has_official_media_id: !!event.audioMediaId,
         message_type: event.contentType,
-        transcription_provider: "openai",
+        transcription_provider: "router",
       },
     });
 
@@ -1176,13 +1368,74 @@ async function transcribeInboundAudio(
           message_type: event.contentType,
           has_evolution_key: !!event.audioKey,
           has_official_media_id: !!event.audioMediaId,
-          transcription_provider: "openai",
+          transcription_provider: "router",
         },
       });
       return null;
     }
 
-    const transcription = await transcribeAudioBase64(audioSource.base64, event.audioMimeType || audioSource.mimeType);
+    const audioMimeType = event.audioMimeType || audioSource.mimeType;
+    let transcriptionResult: AudioTranscriptionResult | null = null;
+    let lastError: AudioTranscriptionError | null = null;
+
+    try {
+      transcriptionResult = await transcribeWithOpenAI(audioSource.base64, audioMimeType);
+    } catch (error) {
+      lastError = error as AudioTranscriptionError;
+
+      await insertWhatsAppEventLog(supabase, {
+        professionalId,
+        conversationId,
+        instanceName: event.instanceName,
+        provider: event.provider,
+        direction: "inbound",
+        eventType: "audio_transcription_provider_failed",
+        messageId: event.messageId,
+        clientIdentifier: event.clientIdentifier,
+        normalizedPhone: event.normalizedPhone,
+        status: "failed",
+        errorCode: lastError.errorCode || "OPENAI_AUDIO_TRANSCRIPTION_FAILED",
+        errorMessage: lastError.message,
+        details: {
+          message_type: event.contentType,
+          transcription_provider: "openai",
+          transcription_model: lastError.model || null,
+          retryable: lastError.retryable === true,
+        },
+      });
+    }
+
+    if (!transcriptionResult) {
+      try {
+        transcriptionResult = await transcribeWithGroq(audioSource.base64, audioMimeType);
+      } catch (error) {
+        lastError = error as AudioTranscriptionError;
+
+        await insertWhatsAppEventLog(supabase, {
+          professionalId,
+          conversationId,
+          instanceName: event.instanceName,
+          provider: event.provider,
+          direction: "inbound",
+          eventType: "audio_transcription_provider_failed",
+          messageId: event.messageId,
+          clientIdentifier: event.clientIdentifier,
+          normalizedPhone: event.normalizedPhone,
+          status: "failed",
+          errorCode: lastError.errorCode || "GROQ_AUDIO_TRANSCRIPTION_FAILED",
+          errorMessage: lastError.message,
+          details: {
+            message_type: event.contentType,
+            transcription_provider: "groq",
+            transcription_model: lastError.model || null,
+            retryable: lastError.retryable === true,
+            fallback_from: "openai",
+          },
+        });
+      }
+    }
+
+    const transcription = transcriptionResult?.text || null;
 
     await insertWhatsAppEventLog(supabase, {
       professionalId,
@@ -1196,14 +1449,16 @@ async function transcribeInboundAudio(
       normalizedPhone: event.normalizedPhone,
       status: transcription ? "processed" : "warning",
       details: {
-        mime_type: event.audioMimeType || audioSource.mimeType || null,
+        mime_type: audioMimeType || null,
         transcription_length: transcription?.length || 0,
         message_type: event.contentType,
-        transcription_provider: "openai",
+        transcription_provider: transcriptionResult?.provider || null,
+        transcription_model: transcriptionResult?.model || null,
+        fallback_used: transcriptionResult?.provider === "groq",
       },
     });
 
-    return transcription;
+    return transcriptionResult;
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     console.error("Audio transcription failed", error);
@@ -1224,7 +1479,7 @@ async function transcribeInboundAudio(
         errorMessage,
         details: {
           message_type: event.contentType,
-          transcription_provider: "openai",
+          transcription_provider: "router",
         },
       });
     } catch (loggingError) {
@@ -1469,8 +1724,8 @@ serve(async (req) => {
 
     if (parsedEvent.contentType === "audio") {
       const transcription = await transcribeInboundAudio(supabase, parsedEvent, professionalId, conversation.id);
-      if (transcription) {
-        clientMessage = transcription;
+      if (transcription?.text) {
+        clientMessage = transcription.text;
 
         await insertWhatsAppEventLog(supabase, {
           professionalId,
@@ -1484,8 +1739,9 @@ serve(async (req) => {
           normalizedPhone: parsedEvent.normalizedPhone,
           status: "processing",
           details: {
-            transcription_provider: "openai",
-            transcription_length: transcription.length,
+            transcription_provider: transcription.provider,
+            transcription_model: transcription.model,
+            transcription_length: transcription.text.length,
             routed_through: "ai_router",
           },
         });
