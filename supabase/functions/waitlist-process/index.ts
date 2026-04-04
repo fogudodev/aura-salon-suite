@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "npm:@supabase/supabase-js@2.57.2";
+import { sendWhatsAppMessage } from "../_shared/whatsapp.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -13,12 +14,6 @@ function normalizePhone(phone: string): string {
   if (digits.length >= 10 && digits.length <= 11) return "55" + digits;
   return digits;
 }
-
-const EVOLUTION_URL = () => Deno.env.get("EVOLUTION_API_URL") || "";
-const getEvolutionHeaders = () => ({
-  "Content-Type": "application/json",
-  apikey: Deno.env.get("EVOLUTION_API_KEY") || "",
-});
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -57,7 +52,7 @@ serve(async (req) => {
       const hour = slotDate.getHours();
       const period = hour < 12 ? "morning" : hour < 18 ? "afternoon" : "evening";
 
-      let query = supabase
+      const query = supabase
         .from("waitlist")
         .select("*, clients(id, name, phone)")
         .eq("professional_id", professionalId)
@@ -387,22 +382,22 @@ ${bookingLink ? `📲 Agende agora: ${bookingLink}` : "Entre em contato para con
 ⏰ Responda rápido, a vaga é limitada!`;
 
     try {
-      const res = await fetch(`${EVOLUTION_URL()}/message/sendText/${inst.instance_name}`, {
-        method: "POST",
-        headers: getEvolutionHeaders(),
-        body: JSON.stringify({ number: phone, text: message }),
+      const sendResult = await sendWhatsAppMessage({
+        supabase,
+        professionalId,
+        recipient: phone,
+        message,
+        instance: inst,
+        preferredProvider: "evolution",
+        details: {
+          source: "waitlist_offer",
+          offer_id: offer?.id || null,
+          cancelled_booking_id: cancelledBookingId,
+        },
       });
 
-      if (res.ok) {
+      if (sendResult.success) {
         sent++;
-        // Log the message
-        await supabase.from("whatsapp_logs").insert({
-          professional_id: professionalId,
-          recipient_phone: phone,
-          message_content: message,
-          status: "sent",
-          sent_at: new Date().toISOString(),
-        });
       }
     } catch (e) {
       console.error("Error sending waitlist offer:", e);

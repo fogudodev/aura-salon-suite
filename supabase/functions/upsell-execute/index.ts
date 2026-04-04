@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "npm:@supabase/supabase-js@2.57.2";
+import { sendWhatsAppMessage } from "../_shared/whatsapp.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -202,18 +203,9 @@ async function handleTrigger(supabase: any, professionalId: string, bookingId: s
 
 async function sendWhatsApp(supabase: any, professionalId: string, phone: string, message: string): Promise<boolean> {
   try {
-    const EVOLUTION_API_URL = Deno.env.get("EVOLUTION_API_URL");
-    const EVOLUTION_API_KEY = Deno.env.get("EVOLUTION_API_KEY");
-
-    if (!EVOLUTION_API_URL || !EVOLUTION_API_KEY) {
-      console.error("Evolution API not configured");
-      return false;
-    }
-
-    // Get WhatsApp instance
     const { data: instance } = await supabase
       .from("whatsapp_instances")
-      .select("instance_name")
+      .select("professional_id, instance_name, meta_phone_id, status")
       .eq("professional_id", professionalId)
       .eq("status", "connected")
       .limit(1)
@@ -224,33 +216,22 @@ async function sendWhatsApp(supabase: any, professionalId: string, phone: string
       return false;
     }
 
-    const cleanPhone = phone.replace(/\D/g, "");
-    const res = await fetch(`${EVOLUTION_API_URL}/message/sendText/${instance.instance_name}`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        apikey: EVOLUTION_API_KEY,
+    const result = await sendWhatsAppMessage({
+      supabase,
+      professionalId,
+      recipient: phone,
+      message,
+      instance,
+      preferredProvider: "evolution",
+      details: {
+        source: "upsell_execute",
       },
-      body: JSON.stringify({
-        number: cleanPhone,
-        text: message,
-      }),
     });
 
-    if (!res.ok) {
-      console.error("WhatsApp send failed:", await res.text());
+    if (!result.success) {
+      console.error("WhatsApp send failed:", result.error || result.responseBody);
       return false;
     }
-
-    // Log
-    await supabase.from("whatsapp_logs").insert({
-      professional_id: professionalId,
-      phone: cleanPhone,
-      message_type: "upsell",
-      direction: "outgoing",
-      status: "sent",
-      metadata: { source: "upsell_engine" },
-    });
 
     return true;
   } catch (e) {

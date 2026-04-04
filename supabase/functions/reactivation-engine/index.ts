@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { sendWhatsAppMessage } from "../_shared/whatsapp.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -11,22 +12,6 @@ function json(data: any, status = 200) {
     status,
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
-}
-
-function getEvolutionUrl(): string {
-  const url = Deno.env.get("EVOLUTION_API_URL");
-  if (!url) {
-    throw new Error("EVOLUTION_API_URL not configured");
-  }
-  return url;
-}
-
-function getEvolutionKey(): string {
-  const key = Deno.env.get("EVOLUTION_API_KEY");
-  if (!key) {
-    throw new Error("EVOLUTION_API_KEY not configured");
-  }
-  return key;
 }
 
 function normalizePhone(phone: string): string {
@@ -222,8 +207,6 @@ Deno.serve(async (req) => {
         .update({ status: "running", started_at: new Date().toISOString() })
         .eq("id", campaignId);
 
-      const evolutionUrl = getEvolutionUrl();
-      const evolutionKey = getEvolutionKey();
       let sentCount = 0;
       let failedCount = 0;
 
@@ -243,19 +226,21 @@ Deno.serve(async (req) => {
             continue;
           }
 
-          const resp = await fetch(`${evolutionUrl}/message/sendText/${instance.instance_name}`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              apikey: evolutionKey,
+          const sendResult = await sendWhatsAppMessage({
+            supabase,
+            professionalId,
+            recipient: phone,
+            message: r.message_payload || campaign.message_template,
+            instance,
+            preferredProvider: "evolution",
+            details: {
+              source: "reactivation_engine",
+              campaign_id: campaignId,
+              recipient_id: r.id,
             },
-            body: JSON.stringify({
-              number: phone,
-              text: r.message_payload || campaign.message_template,
-            }),
           });
 
-          if (resp.ok) {
+          if (sendResult.success) {
             await supabase
               .from("reactivation_campaign_recipients")
               .update({ status: "sent", sent_at: new Date().toISOString() })
@@ -270,10 +255,9 @@ Deno.serve(async (req) => {
             });
             sentCount++;
           } else {
-            const errBody = await resp.text();
             await supabase
               .from("reactivation_campaign_recipients")
-              .update({ status: "failed", error_message: errBody.slice(0, 500) })
+              .update({ status: "failed", error_message: (sendResult.error || JSON.stringify(sendResult.responseBody ?? {})).slice(0, 500) })
               .eq("id", r.id);
             failedCount++;
           }

@@ -108,9 +108,44 @@ export const useCourseClasses = (courseId?: string) => {
       if (error) throw error;
       return data;
     },
-    onSuccess: () => {
+    onSuccess: async (data: any) => {
       queryClient.invalidateQueries({ queryKey: ["course-classes"] });
       toast({ title: "Turma criada com sucesso!" });
+
+      if (professional?.id && data?.id && data.course_id) {
+        try {
+          const { data: waitlistEntries } = await api
+            .from("course_waitlist")
+            .select("id, name, phone, course_classes!inner(course_id)")
+            .eq("professional_id", professional.id)
+            .eq("course_classes.course_id", data.course_id)
+            .eq("notified", false);
+
+          const recipients = Array.from(new Map(
+            (waitlistEntries || [])
+              .filter((entry: any) => entry.phone)
+              .map((entry: any) => [entry.phone, { name: entry.name, phone: entry.phone }])
+          ).values());
+
+          if (recipients.length > 0) {
+            triggerCourseAutomation({
+              professionalId: professional.id,
+              triggerType: "course_waitlist_new_class",
+              classId: data.id,
+              recipients,
+              extraVars: {
+                turma: data.name || "",
+                data: data.class_date ? new Date(data.class_date).toLocaleDateString("pt-BR") : "",
+                horario: data.start_time || "",
+                local: data.location || "",
+                link_aula: data.online_link || "",
+              },
+            });
+          }
+        } catch (error) {
+          console.error("Course waitlist automation error:", error);
+        }
+      }
     },
     onError: (error: any) => {
       toast({ title: "Erro ao criar turma", description: error.message, variant: "destructive" });
@@ -119,6 +154,13 @@ export const useCourseClasses = (courseId?: string) => {
 
   const updateClass = useMutation({
     mutationFn: async ({ id, ...updates }: any) => {
+      const { data: previousClass, error: previousError } = await api
+        .from("course_classes")
+        .select("class_date, start_time, status")
+        .eq("id", id)
+        .single();
+      if (previousError) throw previousError;
+
       const { data, error } = await api
         .from("course_classes")
         .update(updates)
@@ -126,14 +168,19 @@ export const useCourseClasses = (courseId?: string) => {
         .select()
         .single();
       if (error) throw error;
-      return data;
+      return {
+        ...data,
+        __previous_class_date: previousClass?.class_date || null,
+        __previous_start_time: previousClass?.start_time || null,
+        __previous_status: previousClass?.status || null,
+      };
     },
     onSuccess: (data: any, variables: any) => {
       queryClient.invalidateQueries({ queryKey: ["course-classes"] });
       toast({ title: "Turma atualizada!" });
       // Trigger automation if class was cancelled or rescheduled
       if (professional?.id && data?.id) {
-        if (variables.status === "cancelled") {
+        if (variables.status === "cancelled" && variables.status !== data.__previous_status) {
           triggerCourseAutomation({
             professionalId: professional.id,
             triggerType: "course_cancelled",
@@ -141,9 +188,12 @@ export const useCourseClasses = (courseId?: string) => {
             extraVars: { turma: data.name || "", curso: (data as any)?.courses?.name || "" },
           });
         }
-        // If date changed, treat as rescheduled
-        if (variables.class_date && variables.class_date !== data.class_date) {
-          const newDate = new Date(variables.class_date).toLocaleDateString("pt-BR");
+        if (
+          (variables.class_date && variables.class_date !== data.__previous_class_date) ||
+          (variables.start_time && variables.start_time !== data.__previous_start_time)
+        ) {
+          const rescheduledDate = variables.class_date || data.class_date;
+          const newDate = rescheduledDate ? new Date(rescheduledDate).toLocaleDateString("pt-BR") : "";
           triggerCourseAutomation({
             professionalId: professional.id,
             triggerType: "course_rescheduled",

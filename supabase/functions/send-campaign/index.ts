@@ -1,26 +1,11 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "npm:@supabase/supabase-js@2.57.2";
+import { sendWhatsAppMessage } from "../_shared/whatsapp.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
-
-function getEvolutionUrl(): string {
-  const url = Deno.env.get("EVOLUTION_API_URL");
-  if (!url) {
-    throw new Error("EVOLUTION_API_URL not configured");
-  }
-  return url;
-}
-
-function getEvolutionKey(): string {
-  const key = Deno.env.get("EVOLUTION_API_KEY");
-  if (!key) {
-    throw new Error("EVOLUTION_API_KEY not configured");
-  }
-  return key;
-}
 
 function replaceVars(template: string, vars: Record<string, string>): string {
   let result = template;
@@ -40,9 +25,6 @@ serve(async (req) => {
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
     { auth: { persistSession: false } }
   );
-
-  const EVOLUTION_URL = getEvolutionUrl();
-  const EVOLUTION_KEY = getEvolutionKey();
 
   try {
     // Auth check using getClaims
@@ -238,13 +220,20 @@ serve(async (req) => {
           });
 
           try {
-            const sendRes = await fetch(`${EVOLUTION_URL}/message/sendText/${inst.instance_name}`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json", apikey: EVOLUTION_KEY },
-              body: JSON.stringify({ number: contact.phone, text: finalMessage }),
+            const sendResult = await sendWhatsAppMessage({
+              supabase: supabaseAdmin,
+              professionalId,
+              recipient: contact.phone,
+              message: finalMessage,
+              instance: inst,
+              preferredProvider: "evolution",
+              details: {
+                source: "send_campaign",
+                campaign_id: campaign.id,
+              },
             });
 
-            if (sendRes.ok) {
+            if (sendResult.success) {
               sentCount++;
               await supabaseAdmin.from("campaign_contacts")
                 .update({ status: "sent", sent_at: new Date().toISOString() })
@@ -252,9 +241,8 @@ serve(async (req) => {
                 .eq("phone", contact.phone);
             } else {
               failedCount++;
-              const errData = await sendRes.json();
               await supabaseAdmin.from("campaign_contacts")
-                .update({ status: "failed", error_message: JSON.stringify(errData) })
+                .update({ status: "failed", error_message: sendResult.error || JSON.stringify(sendResult.responseBody ?? {}) })
                 .eq("campaign_id", campaign.id)
                 .eq("phone", contact.phone);
             }

@@ -9,6 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useCourses, useCourseEnrollments } from "@/hooks/useCourses";
+import { triggerCourseAutomation } from "@/hooks/useCourseAutomations";
 import { useProfessional } from "@/hooks/useProfessional";
 import { api } from "@/lib/api-client";
 import { useQueryClient, useQuery, useMutation } from "@tanstack/react-query";
@@ -68,10 +69,23 @@ const CourseCertificates = () => {
       const { error } = await api.from("course_certificates").insert(inserts);
       if (error) throw error;
     },
-    onSuccess: () => {
+    onSuccess: (_: unknown, enrollmentIds: string[]) => {
       queryClient.invalidateQueries({ queryKey: ["course-certificates"] });
       setSelected(new Set());
       toast({ title: "Certificados emitidos com sucesso!" });
+
+      if (professional?.id) {
+        enrollmentIds.forEach((enrollmentId) => {
+          triggerCourseAutomation({
+            professionalId: professional.id,
+            triggerType: "course_certificate_sent",
+            enrollmentId,
+            extraVars: {
+              link_certificado: "",
+            },
+          });
+        });
+      }
     },
     onError: (err: any) => {
       toast({ title: "Erro ao emitir certificados", description: err.message, variant: "destructive" });

@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "npm:@supabase/supabase-js@2.57.2";
+import { sendWhatsAppMessage } from "../_shared/whatsapp.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -187,36 +188,32 @@ serve(async (req) => {
 
       case "send-message": {
         const { instanceName, phone, message } = params;
-        const normalizedPhone = normalizePhone(phone);
-        const res = await fetch(`${getEvolutionUrl()}/message/sendText/${instanceName}`, {
-          method: "POST",
-          headers: getEvolutionHeaders(),
-          body: JSON.stringify({
-            number: normalizedPhone,
-            text: message,
-          }),
-        });
-        
-        let sendResult: any;
-        if (res.ok) {
-          sendResult = await res.json();
-        } else {
-          sendResult = await res.json().catch(() => ({}));
-          if (res.status === 404) {
-            await supabase.from("whatsapp_instances")
-              .update({ status: "disconnected" })
-              .eq("instance_name", instanceName);
-          }
-          result = { success: false, error: `Failed to send message: ${res.status}`, details: sendResult };
+        const { data: instance } = await supabase
+          .from("whatsapp_instances")
+          .select("professional_id, instance_name, meta_phone_id, status")
+          .eq("instance_name", instanceName)
+          .maybeSingle();
+
+        if (!instance?.professional_id) {
+          result = { success: false, error: "Instância não encontrada" };
           break;
         }
 
-        if (res.status === 404) {
-          await supabase.from("whatsapp_instances")
-            .update({ status: "disconnected" })
-            .eq("instance_name", instanceName);
-        }
-        result = { success: true, data: sendResult };
+        const sendResult = await sendWhatsAppMessage({
+          supabase,
+          professionalId: instance.professional_id,
+          recipient: phone,
+          message,
+          instance,
+          preferredProvider: "evolution",
+          details: {
+            source: "whatsapp_send_message",
+          },
+        });
+
+        result = sendResult.success
+          ? { success: true, data: sendResult.responseBody, provider: sendResult.provider }
+          : { success: false, error: sendResult.error || "Falha ao enviar mensagem", details: sendResult.responseBody };
         break;
       }
 
@@ -300,31 +297,22 @@ serve(async (req) => {
 
         const finalMessage = replaceVars(messageTemplate, templateVars);
 
-        const sendRes = await fetch(`${getEvolutionUrl()}/message/sendText/${inst.instance_name}`, {
-          method: "POST",
-          headers: getEvolutionHeaders(),
-          body: JSON.stringify({ number: phone, text: finalMessage }),
-        });
-        const sendData = await sendRes.json();
-
-        if (sendRes.status === 404) {
-          await supabase.from("whatsapp_instances")
-            .update({ status: "disconnected" })
-            .eq("instance_name", inst.instance_name);
-        }
-
-        await supabase.from("whatsapp_logs").insert({
-          professional_id: professionalId,
-          automation_id: automation.id,
-          booking_id: bookingId,
-          recipient_phone: phone,
-          message_content: finalMessage,
-          status: sendRes.ok ? "sent" : "failed",
-          sent_at: sendRes.ok ? new Date().toISOString() : null,
-          error_message: sendRes.ok ? null : JSON.stringify(sendData),
+        const sendResult = await sendWhatsAppMessage({
+          supabase,
+          professionalId,
+          recipient: phone,
+          message: finalMessage,
+          instance: inst,
+          automationId: automation.id,
+          bookingId,
+          preferredProvider: "evolution",
+          details: {
+            source: "whatsapp_trigger_automation",
+            trigger_type: triggerType,
+          },
         });
 
-        result = { success: sendRes.ok, data: sendData };
+        result = { success: sendResult.success, data: sendResult.responseBody, provider: sendResult.provider, error: sendResult.error };
         break;
       }
 
@@ -350,29 +338,20 @@ serve(async (req) => {
 
         const msg = `💰 *Nova comissão pendente!*\n\nOlá ${employee.name}! Você tem uma nova comissão:\n\n💇 Valor do serviço: R$ ${Number(bookingAmount).toFixed(2)}\n📊 Percentual: ${percentage}%\n💵 Sua comissão: *R$ ${Number(commissionAmount).toFixed(2)}*\n\nAguarde o repasse pelo gestor. 😊`;
 
-        const sendRes = await fetch(`${getEvolutionUrl()}/message/sendText/${inst.instance_name}`, {
-          method: "POST",
-          headers: getEvolutionHeaders(),
-          body: JSON.stringify({ number: normalizedEmpPhone, text: msg }),
-        });
-        const sendData = await sendRes.json();
-
-        if (sendRes.status === 404) {
-          await supabase.from("whatsapp_instances")
-            .update({ status: "disconnected" })
-            .eq("instance_name", inst.instance_name);
-        }
-
-        await supabase.from("whatsapp_logs").insert({
-          professional_id: professionalId,
-          recipient_phone: normalizedEmpPhone,
-          message_content: msg,
-          status: sendRes.ok ? "sent" : "failed",
-          sent_at: sendRes.ok ? new Date().toISOString() : null,
-          error_message: sendRes.ok ? null : JSON.stringify(sendData),
+        const sendResult = await sendWhatsAppMessage({
+          supabase,
+          professionalId,
+          recipient: normalizedEmpPhone,
+          message: msg,
+          instance: inst,
+          preferredProvider: "evolution",
+          details: {
+            source: "notify_commission",
+            employee_id: employeeId,
+          },
         });
 
-        result = { success: sendRes.ok, data: sendData };
+        result = { success: sendResult.success, data: sendResult.responseBody, provider: sendResult.provider, error: sendResult.error };
         break;
       }
 
@@ -401,29 +380,20 @@ serve(async (req) => {
           const normalizedPaidPhone = normalizePhone(employee.phone);
           const msg = `✅ *Comissão paga!*\n\nOlá ${employee.name}! Suas comissões foram pagas.\n\n💵 Valor total: *R$ ${Number(totalAmount).toFixed(2)}*\n\nObrigado pelo excelente trabalho! 🎉`;
 
-          const sendRes = await fetch(`${getEvolutionUrl()}/message/sendText/${inst.instance_name}`, {
-            method: "POST",
-            headers: getEvolutionHeaders(),
-            body: JSON.stringify({ number: normalizedPaidPhone, text: msg }),
-          });
-          const sendData = await sendRes.json();
-
-          if (sendRes.status === 404) {
-            await supabase.from("whatsapp_instances")
-              .update({ status: "disconnected" })
-              .eq("instance_name", inst.instance_name);
-          }
-
-          await supabase.from("whatsapp_logs").insert({
-            professional_id: professionalId,
-            recipient_phone: normalizedPaidPhone,
-            message_content: msg,
-            status: sendRes.ok ? "sent" : "failed",
-            sent_at: sendRes.ok ? new Date().toISOString() : null,
-            error_message: sendRes.ok ? null : JSON.stringify(sendData),
+          const sendResult = await sendWhatsAppMessage({
+            supabase,
+            professionalId,
+            recipient: normalizedPaidPhone,
+            message: msg,
+            instance: inst,
+            preferredProvider: "evolution",
+            details: {
+              source: "notify_commission_paid",
+              employee_id: empId,
+            },
           });
 
-          results.push({ employeeId: empId, success: sendRes.ok });
+          results.push({ employeeId: empId, success: sendResult.success });
         }
 
         result = { success: true, results };
