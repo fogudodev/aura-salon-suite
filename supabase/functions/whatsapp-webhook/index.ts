@@ -802,7 +802,7 @@ async function handleFollowUp(
     .eq("id", conversationId)
     .single();
 
-  if (!conversation) return json({ error: "Conversa não encontrada" }, 404);
+  if (!conversation) return safeResponse({ error: "Conversa não encontrada" });
 
   const { data: instance } = await supabase
     .from("whatsapp_instances")
@@ -810,7 +810,7 @@ async function handleFollowUp(
     .eq("professional_id", professionalId)
     .maybeSingle();
 
-  if (!instance) return json({ error: "WhatsApp não conectado" }, 400);
+  if (!instance) return safeResponse({ error: "WhatsApp não conectado" });
 
   const { data: professional } = await supabase
     .from("professionals")
@@ -859,7 +859,7 @@ async function handleFollowUp(
     );
   }
 
-  return json({ success: sendResult.success, provider: sendResult.provider, error: sendResult.error });
+  return safeResponse({ success: sendResult.success, provider: sendResult.provider, error: sendResult.error });
 }
 
 function parseEvolutionEvent(body: Record<string, unknown>): ParsedInboundEvent {
@@ -1191,23 +1191,27 @@ async function transcribeInboundAudio(
     const errorMessage = error instanceof Error ? error.message : String(error);
     console.error("Audio transcription failed", error);
 
-    await insertWhatsAppEventLog(supabase, {
-      professionalId,
-      conversationId,
-      instanceName: event.instanceName,
-      provider: event.provider,
-      direction: "inbound",
-      eventType: "audio_transcription_failed",
-      messageId: event.messageId,
-      clientIdentifier: event.clientIdentifier,
-      normalizedPhone: event.normalizedPhone,
-      status: "failed",
-      errorCode: "AUDIO_TRANSCRIPTION_FAILED",
-      errorMessage,
-      details: {
-        message_type: event.contentType,
-      },
-    });
+    try {
+      await insertWhatsAppEventLog(supabase, {
+        professionalId,
+        conversationId,
+        instanceName: event.instanceName,
+        provider: event.provider,
+        direction: "inbound",
+        eventType: "audio_transcription_failed",
+        messageId: event.messageId,
+        clientIdentifier: event.clientIdentifier,
+        normalizedPhone: event.normalizedPhone,
+        status: "failed",
+        errorCode: "AUDIO_TRANSCRIPTION_FAILED",
+        errorMessage,
+        details: {
+          message_type: event.contentType,
+        },
+      });
+    } catch (loggingError) {
+      console.error("Audio transcription error logging failed", loggingError);
+    }
 
     return null;
   }
@@ -1241,25 +1245,29 @@ async function safeGenerateWebhookAIResponse(params: {
     const errorMessage = error instanceof Error ? error.message : String(error);
     console.error("AI failed", error);
 
-    await insertWhatsAppEventLog(params.supabase, {
-      professionalId: params.professionalId,
-      conversationId: params.context.conversationId,
-      instanceName: params.context.instanceName,
-      provider: "safe_response",
-      model: "safe_response",
-      direction: "system",
-      eventType: "ai_request_failed",
-      messageId: params.context.messageId,
-      clientIdentifier: params.context.clientIdentifier,
-      normalizedPhone: params.context.normalizedPhone,
-      status: "failed",
-      errorCode: "AI_GENERATION_FAILED",
-      errorMessage,
-      fallbackUsed: true,
-      details: {
-        use_case: params.context.useCase,
-      },
-    });
+    try {
+      await insertWhatsAppEventLog(params.supabase, {
+        professionalId: params.professionalId,
+        conversationId: params.context.conversationId,
+        instanceName: params.context.instanceName,
+        provider: "safe_response",
+        model: "safe_response",
+        direction: "system",
+        eventType: "ai_request_failed",
+        messageId: params.context.messageId,
+        clientIdentifier: params.context.clientIdentifier,
+        normalizedPhone: params.context.normalizedPhone,
+        status: "failed",
+        errorCode: "AI_GENERATION_FAILED",
+        errorMessage,
+        fallbackUsed: true,
+        details: {
+          use_case: params.context.useCase,
+        },
+      });
+    } catch (loggingError) {
+      console.error("AI failure logging failed", loggingError);
+    }
 
     return {
       text: SAFE_AI_REPLY,
@@ -1287,7 +1295,7 @@ serve(async (req) => {
       return new Response(challenge, { status: 200 });
     }
 
-    return new Response("forbidden", { status: 403 });
+    return safeResponse({ ignored: "verification_failed" });
   }
 
   const supabase = getSupabaseAdmin();
@@ -1449,26 +1457,6 @@ serve(async (req) => {
       } else {
         fallbackReply = SAFE_AI_REPLY;
       }
-/*
-          fallbackReply = "Não consegui entender esse áudio. Pode me enviar em texto ou um áudio mais curto?";
-        }
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        await insertWhatsAppEventLog(supabase, {
-          professionalId,
-          conversationId: conversation.id,
-          instanceName: String(instance.instance_name || parsedEvent.instanceName || ""),
-          provider: parsedEvent.provider,
-          direction: "inbound",
-          eventType: "audio_transcription_failed",
-          messageId: parsedEvent.messageId,
-          clientIdentifier: parsedEvent.clientIdentifier,
-          normalizedPhone: parsedEvent.normalizedPhone,
-          status: "failed",
-          errorMessage,
-        });
-        fallbackReply = "Tive um problema para transcrever o seu áudio. Pode me enviar a mensagem em texto?";
-      }
-*/
     } else if (parsedEvent.contentType === "media") {
       await insertWhatsAppEventLog(supabase, {
         professionalId,
@@ -1488,9 +1476,6 @@ serve(async (req) => {
       });
 
       return safeResponse({ ignored: "unsupported_message_type" });
-/*
-      fallbackReply = "Recebi sua mídia. Para continuar o atendimento, me envie uma mensagem de texto ou um áudio.";
-*/
     }
 
     const messages = Array.isArray(conversation.messages) ? [...conversation.messages] : [];
