@@ -1,10 +1,203 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api-client";
 import { useProfessional } from "./useProfessional";
-import type { TablesInsert, TablesUpdate } from "@/integrations/supabase/types";
+import type { Tables, TablesInsert, TablesUpdate } from "@/integrations/supabase/types";
 import { format, startOfDay, endOfDay, startOfWeek, endOfWeek } from "date-fns";
 
 const BUFFER_MINUTES = 10;
+
+type BookingServiceRow = {
+  booking_id: string;
+  service_id: string;
+  sort_order: number;
+  services?: {
+    id: string;
+    name: string;
+    price: number;
+    duration_minutes: number;
+  } | null;
+};
+
+type BookingRow = Tables<"bookings"> & {
+  services?: {
+    name?: string;
+    category?: string | null;
+  } | null;
+  clients?: {
+    name?: string | null;
+    phone?: string | null;
+    email?: string | null;
+  } | null;
+  booking_services?: BookingServiceRow[];
+  service_names?: string;
+};
+
+type BlockedTimeRow = Tables<"blocked_times">;
+
+const normalizeClientPhone = (phone?: string | null) => {
+  const digits = (phone || "").replace(/\D/g, "");
+  if (!digits) return "";
+  if (digits.startsWith("55")) return digits;
+  return `55${digits}`;
+};
+
+const enrichBookingsWithServices = async (bookings: BookingRow[] | null | undefined) => {
+  if (!bookings?.length) return bookings || [];
+
+  const bookingIds = bookings.map((booking) => booking.id);
+  const { data: bookingServices, error } = await api
+    .from("booking_services" as never)
+    .select("booking_id, service_id, sort_order, services(id, name, price, duration_minutes)")
+    .in("booking_id", bookingIds)
+    .order("sort_order", { ascending: true });
+
+  if (error) throw error;
+
+  const itemsByBooking = new Map<string, BookingServiceRow[]>();
+  ((bookingServices as BookingServiceRow[] | null) || []).forEach((item) => {
+    const list = itemsByBooking.get(item.booking_id) || [];
+    list.push(item);
+    itemsByBooking.set(item.booking_id, list);
+  });
+
+  return bookings.map((booking) => {
+    const items = itemsByBooking.get(booking.id) || [];
+    const primaryService = items[0]?.services || booking.services || null;
+
+    return {
+      ...booking,
+      services: primaryService,
+      booking_services: items,
+      service_names: items.length > 0
+        ? items.map((item) => item.services?.name).filter(Boolean).join(", ")
+        : booking.services?.name || "",
+    };
+  });
+};
+
+const getOrCreateClient = async ({
+  professionalId,
+  clientName,
+  clientPhone,
+}: {
+  professionalId: string;
+  clientName?: string | null;
+  clientPhone?: string | null;
+}) => {
+  const normalizedPhone = normalizeClientPhone(clientPhone);
+  const trimmedName = (clientName || "").trim();
+
+  let existingClient: { id: string; name: string; phone: string | null } | null = null;
+
+  if (normalizedPhone) {
+    const { data } = await api
+      .from("clients")
+      .select("id, name, phone")
+      .eq("professional_id", professionalId)
+      .eq("phone", normalizedPhone)
+      .maybeSingle();
+    existingClient = data;
+  }
+
+  if (!existingClient && trimmedName) {
+    const { data } = await api
+      .from("clients")
+      .select("id, name, phone")
+      .eq("professional_id", professionalId)
+      .ilike("name", trimmedName)
+      .maybeSingle();
+    existingClient = data;
+  }
+
+  if (existingClient) {
+    const updates: Record<string, string> = {};
+    if (trimmedName && existingClient.name !== trimmedName) updates.name = trimmedName;
+    if (normalizedPhone && existingClient.phone !== normalizedPhone) updates.phone = normalizedPhone;
+
+    if (Object.keys(updates).length > 0) {
+      await api.from("clients").update(updates).eq("id", existingClient.id);
+    }
+
+    return {
+      clientId: existingClient.id,
+      clientName: trimmedName || existingClient.name,
+      clientPhone: normalizedPhone || existingClient.phone || "",
+    };
+  }
+
+  if (!trimmedName) {
+    return {
+      clientId: null,
+      clientName: "",
+      clientPhone: normalizedPhone,
+    };
+  }
+
+  const { data: newClient, error } = await api
+    .from("clients")
+    .insert({
+      professional_id: professionalId,
+      name: trimmedName,
+      phone: normalizedPhone,
+    })
+    .select("id, name, phone")
+    .single();
+
+  if (error) throw error;
+
+  return {
+    clientId: newClient.id,
+    clientName: newClient.name,
+    clientPhone: newClient.phone || "",
+  };
+};
+
+const syncBookingServices = async (bookingId: string, serviceIds: string[]) => {
+  const uniqueServiceIds = Array.from(new Set(serviceIds.filter(Boolean)));
+
+  const { data: existingRows, error: existingError } = await api
+        .from("booking_services" as never)
+    .select("id, service_id")
+    .eq("booking_id", bookingId);
+
+  if (existingError) throw existingError;
+
+  const existing = (existingRows || []) as Array<{ id: string; service_id: string }>;
+  const existingIds = new Set(existing.map((row) => row.service_id));
+  const nextIds = new Set(uniqueServiceIds);
+
+  const rowsToDelete = existing
+    .filter((row) => !nextIds.has(row.service_id))
+    .map((row) => row.id);
+
+  if (rowsToDelete.length > 0) {
+    const { error } = await api.from("booking_services" as never).delete().in("id", rowsToDelete);
+    if (error) throw error;
+  }
+
+  const rowsToInsert = uniqueServiceIds
+    .filter((serviceId) => !existingIds.has(serviceId))
+    .map((serviceId, index) => ({
+      booking_id: bookingId,
+      service_id: serviceId,
+      sort_order: index,
+    }));
+
+  if (rowsToInsert.length > 0) {
+    const { error } = await api.from("booking_services" as never).insert(rowsToInsert);
+    if (error) throw error;
+  }
+
+  for (let index = 0; index < uniqueServiceIds.length; index += 1) {
+    const serviceId = uniqueServiceIds[index];
+    const { error } = await api
+      .from("booking_services" as never)
+      .update({ sort_order: index })
+      .eq("booking_id", bookingId)
+      .eq("service_id", serviceId);
+    if (error) throw error;
+  }
+};
 
 export const useBookings = (date?: Date) => {
   const { data: professional } = useProfessional();
@@ -26,7 +219,7 @@ export const useBookings = (date?: Date) => {
 
       const { data, error } = await query;
       if (error) throw error;
-      return data;
+      return enrichBookingsWithServices(data);
     },
     enabled: !!professional?.id,
   });
@@ -48,7 +241,7 @@ export const useBookingsWeek = (date: Date) => {
         .lte("start_time", endOfDay(weekEnd).toISOString())
         .order("start_time", { ascending: true });
       if (error) throw error;
-      return data;
+      return enrichBookingsWithServices(data);
     },
     enabled: !!professional?.id,
   });
@@ -70,7 +263,7 @@ export const useBookingsMonth = (date: Date) => {
         .lte("start_time", endOfDay(monthEnd).toISOString())
         .order("start_time", { ascending: true });
       if (error) throw error;
-      return data;
+      return enrichBookingsWithServices(data);
     },
     enabled: !!professional?.id,
   });
@@ -81,12 +274,12 @@ export const useBookingsMonth = (date: Date) => {
  * Each booking blocks: start_time to end_time + BUFFER_MINUTES
  */
 export const getAvailableSlots = (
-  existingBookings: any[],
+  existingBookings: BookingRow[],
   serviceDurationMinutes: number,
   startHour = 7,
   endHour = 21,
   intervalMinutes = 10,
-  blockedTimes: any[] = [],
+  blockedTimes: BlockedTimeRow[] = [],
   slotDate?: Date
 ) => {
   const slots: string[] = [];
@@ -160,13 +353,35 @@ export const useCreateBooking = () => {
   const { data: professional } = useProfessional();
 
   return useMutation({
-    mutationFn: async (booking: Omit<TablesInsert<"bookings">, "professional_id">) => {
+    mutationFn: async ({
+      service_ids,
+      ...booking
+    }: Omit<TablesInsert<"bookings">, "professional_id"> & { service_ids?: string[] }) => {
+      const client = await getOrCreateClient({
+        professionalId: professional!.id,
+        clientName: booking.client_name,
+        clientPhone: booking.client_phone,
+      });
+
       const { data, error } = await api
         .from("bookings")
-        .insert({ ...booking, professional_id: professional!.id })
+        .insert({
+          ...booking,
+          professional_id: professional!.id,
+          client_id: client.clientId,
+          client_name: client.clientName,
+          client_phone: client.clientPhone,
+          service_id: service_ids?.[0] || booking.service_id,
+        })
         .select()
         .single();
       if (error) throw error;
+
+      const finalServiceIds = service_ids?.length ? service_ids : (data.service_id ? [data.service_id] : []);
+      if (finalServiceIds.length > 0) {
+        await syncBookingServices(data.id, finalServiceIds);
+      }
+
       return data;
     },
     onSuccess: async (data) => {
@@ -205,20 +420,80 @@ export const useUpdateBooking = () => {
   const qc = useQueryClient();
 
   return useMutation({
-    mutationFn: async ({ id, ...updates }: TablesUpdate<"bookings"> & { id: string }) => {
+    mutationFn: async ({
+      id,
+      service_ids,
+      ...updates
+    }: TablesUpdate<"bookings"> & { id: string; service_ids?: string[] }) => {
+      let normalizedUpdates = { ...updates };
+      let previousStatus: string | null = null;
+
+      if (updates.client_name || updates.client_phone) {
+        const { data: currentBooking, error: bookingError } = await api
+          .from("bookings")
+          .select("professional_id, client_name, client_phone, status")
+          .eq("id", id)
+          .single();
+
+        if (bookingError) throw bookingError;
+        previousStatus = currentBooking.status;
+
+        const client = await getOrCreateClient({
+          professionalId: currentBooking.professional_id,
+          clientName: updates.client_name ?? currentBooking.client_name,
+          clientPhone: updates.client_phone ?? currentBooking.client_phone,
+        });
+
+        normalizedUpdates = {
+          ...normalizedUpdates,
+          client_id: client.clientId,
+          client_name: client.clientName,
+          client_phone: client.clientPhone,
+        };
+      }
+
+      if (previousStatus === null) {
+        const { data: currentBooking, error: currentBookingError } = await api
+          .from("bookings")
+          .select("status")
+          .eq("id", id)
+          .single();
+
+        if (currentBookingError) throw currentBookingError;
+        previousStatus = currentBooking.status;
+      }
+
       const { data, error } = await api
         .from("bookings")
-        .update(updates)
+        .update({
+          ...normalizedUpdates,
+          service_id: service_ids?.[0] || normalizedUpdates.service_id,
+        })
         .eq("id", id)
         .select()
         .single();
       if (error) throw error;
-      return data;
+
+      if (service_ids?.length) {
+        await syncBookingServices(id, service_ids);
+      }
+
+      return {
+        ...data,
+        __previous_status: previousStatus,
+      };
     },
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ["bookings"] });
       qc.invalidateQueries({ queryKey: ["bookings-week"] });
       qc.invalidateQueries({ queryKey: ["bookings-month"] });
+
+      if (data && data.status === "completed" && data.__previous_status !== "completed") {
+        import("./useWhatsApp").then(({ triggerWhatsAppAutomation }) => {
+          triggerWhatsAppAutomation(data.professional_id, data.id, "post_service");
+          triggerWhatsAppAutomation(data.professional_id, data.id, "post_sale_review");
+        });
+      }
 
       // If booking was cancelled, trigger waitlist processing
       if (data && data.status === "cancelled") {
@@ -235,13 +510,13 @@ export const useUpdateBooking = () => {
         }).catch((err) => { console.error("Waitlist process error:", err); });
 
         // Delete from Google Calendar if linked
-        if ((data as any).google_calendar_event_id) {
+        if (data.google_calendar_event_id) {
           api.functions.invoke("google-calendar-sync", {
             body: {
               action: "delete_event",
               professional_id: data.professional_id,
               booking_id: data.id,
-              event_id: (data as any).google_calendar_event_id,
+              event_id: data.google_calendar_event_id,
             },
           }).catch(() => { /* silent fail */ });
         }
@@ -262,13 +537,13 @@ export const useDeleteBooking = () => {
       if (error) throw error;
 
       // Delete from Google Calendar if linked
-      if (booking && (booking as any).google_calendar_event_id) {
+      if (booking?.google_calendar_event_id) {
         api.functions.invoke("google-calendar-sync", {
           body: {
             action: "delete_event",
             professional_id: booking.professional_id,
             booking_id: id,
-            event_id: (booking as any).google_calendar_event_id,
+            event_id: booking.google_calendar_event_id,
           },
         }).catch(() => { /* silent fail */ });
       }

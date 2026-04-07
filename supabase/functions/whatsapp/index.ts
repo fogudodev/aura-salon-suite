@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "npm:@supabase/supabase-js@2.57.2";
+import { buildProfessionalReviewChoices, buildProfessionalReviewLink } from "../_shared/reviews.ts";
 import { sendWhatsAppMessage } from "../_shared/whatsapp.ts";
 
 const corsHeaders = {
@@ -259,11 +260,21 @@ serve(async (req) => {
 
         const slug = prof.slug || "";
         const bookingLink = slug ? `https://gende.io/${slug}` : "";
-        const reviewLink = slug ? `https://gende.io/${slug}?review=true&booking=${bookingId}${booking.employee_id ? `&employee=${booking.employee_id}` : ""}` : "";
+        const reviewLink = buildProfessionalReviewLink({
+          slug,
+          bookingId,
+          employeeId: booking.employee_id || null,
+        });
+        const reviewChoices = buildProfessionalReviewChoices({
+          slug,
+          bookingId,
+          employeeId: booking.employee_id || null,
+        });
 
         const startDate = new Date(booking.start_time);
         const dataFormatted = startDate.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric" });
         const horarioFormatted = startDate.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const serviceName = (booking as any).services?.name || "serviço";
 
         const templateVars: Record<string, string> = {
@@ -272,7 +283,7 @@ serve(async (req) => {
           data: dataFormatted,
           horario: horarioFormatted,
           link: bookingLink,
-          link_avaliacao: reviewLink,
+          link_avaliacao: reviewChoices || reviewLink,
         };
 
         let messageTemplate = automation.message_template;
@@ -295,7 +306,14 @@ serve(async (req) => {
           if (bookingLink) messageTemplate += `\n\n✨ Sentimos sua falta! Agende pelo link: ${bookingLink}`;
         }
 
-        const finalMessage = replaceVars(messageTemplate, templateVars);
+        if (triggerType === "post_sale_review" && !automation.message_template) {
+          messageTemplate = "Ola {nome}! Como foi seu atendimento de {servico}?\n\nToque na quantidade de estrelas que melhor representa sua experiencia:";
+        }
+
+        const baseMessage = replaceVars(messageTemplate, templateVars);
+        const finalMessage = triggerType === "post_sale_review" && reviewChoices && !messageTemplate.includes("{link_avaliacao}")
+          ? `${baseMessage}\n\n${reviewChoices}`
+          : baseMessage;
 
         const sendResult = await sendWhatsAppMessage({
           supabase,

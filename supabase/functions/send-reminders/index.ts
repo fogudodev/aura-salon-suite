@@ -37,8 +37,6 @@ serve(async (req) => {
     const h24End = new Date(now.getTime() + 25 * 60 * 60 * 1000).toISOString();
     const h3Start = new Date(now.getTime() + 2.5 * 60 * 60 * 1000).toISOString();
     const h3End = new Date(now.getTime() + 3.5 * 60 * 60 * 1000).toISOString();
-    const postSaleStart = new Date(now.getTime() - 25 * 60 * 60 * 1000).toISOString();
-    const postSaleEnd = new Date(now.getTime() - 23 * 60 * 60 * 1000).toISOString();
 
     const { data: bookings24h } = await supabase
       .from("bookings")
@@ -54,13 +52,6 @@ serve(async (req) => {
       .gte("start_time", h3Start)
       .lte("start_time", h3End);
 
-    const { data: completedBookings } = await supabase
-      .from("bookings")
-      .select("id, professional_id, client_id, client_name, client_phone, start_time, service_id, employee_id, services:service_id(name), updated_at")
-      .eq("status", "completed")
-      .gte("updated_at", postSaleStart)
-      .lte("updated_at", postSaleEnd);
-
     const { data: servicesWithMaintenance } = await supabase
       .from("services")
       .select("id, name, maintenance_interval_days, professional_id")
@@ -72,9 +63,9 @@ serve(async (req) => {
       const maintenanceDue = new Date(now.getTime() - (Number(service.maintenance_interval_days) - 3) * 24 * 60 * 60 * 1000);
       const maintenanceDueEnd = new Date(now.getTime() - (Number(service.maintenance_interval_days) - 2) * 24 * 60 * 60 * 1000);
 
-        const { data: dueBookings } = await supabase
-          .from("bookings")
-          .select("id, professional_id, client_id, client_name, client_phone, start_time, service_id, employee_id")
+      const { data: dueBookings } = await supabase
+        .from("bookings")
+        .select("id, professional_id, client_id, client_name, client_phone, start_time, service_id, employee_id")
         .eq("status", "completed")
         .eq("service_id", service.id)
         .gte("start_time", maintenanceDue.toISOString())
@@ -102,7 +93,6 @@ serve(async (req) => {
     const allBookings = [
       ...((bookings24h || []).map((booking) => ({ ...booking, triggerType: "reminder_24h" }))),
       ...((bookings3h || []).map((booking) => ({ ...booking, triggerType: "reminder_3h" }))),
-      ...((completedBookings || []).map((booking) => ({ ...booking, triggerType: "post_sale_review" }))),
       ...(maintenanceBookings.map((booking) => ({ ...booking, triggerType: "maintenance_reminder" }))),
       ...((reactivationBookings || []).map((booking) => ({ ...booking, triggerType: "reactivation_30d" }))),
     ];
@@ -145,7 +135,7 @@ serve(async (req) => {
         .from("whatsapp_automations")
         .select("*")
         .eq("professional_id", professionalId)
-        .in("trigger_type", ["reminder_24h", "reminder_3h", "post_sale_review", "maintenance_reminder", "reactivation_30d"])
+        .in("trigger_type", ["reminder_24h", "reminder_3h", "maintenance_reminder", "reactivation_30d"])
         .eq("is_active", true);
 
       const activeAutomations = new Map((automations || []).map((automation) => [automation.trigger_type, automation]));
@@ -183,7 +173,7 @@ serve(async (req) => {
 
       for (const booking of bookings) {
         if (dailyLimit !== -1 && remindersSent >= dailyLimit) {
-          results.push({ type: booking.triggerType, bookingId: booking.id, success: false, error: "Limite diário atingido" });
+          results.push({ type: booking.triggerType, bookingId: booking.id, success: false, error: "Limite diario atingido" });
           continue;
         }
 
@@ -212,21 +202,16 @@ serve(async (req) => {
         if (existingLog && existingLog.length > 0) continue;
 
         const bookingDate = new Date(String(booking.start_time));
-        const serviceName = String((booking as { services?: { name?: string } }).services?.name || "serviço");
+        const serviceName = String((booking as { services?: { name?: string } }).services?.name || "servico");
         const bookingLink = professional.slug ? `https://gende.io/${professional.slug}` : "";
-        const reviewLink = professional.slug
-          ? `https://gende.io/${professional.slug}?review=true&booking=${booking.id}${booking.employee_id ? `&employee=${booking.employee_id}` : ""}`
-          : "";
 
         let template = automation.message_template;
         if ((booking.triggerType === "reminder_24h" || booking.triggerType === "reminder_3h") && professional.reminder_message) {
           template = professional.reminder_message;
-        } else if (booking.triggerType === "post_sale_review" && (!template || template.trim() === "")) {
-          template = "Olá {nome}! Como foi seu atendimento de {servico}? Adoraríamos saber sua opinião!\n\n⭐ Deixe sua avaliação: {link_avaliacao}";
         } else if (booking.triggerType === "maintenance_reminder" && (!template || template.trim() === "")) {
-          template = "Olá {nome}! Está chegando a hora da sua manutenção de {servico}. Que tal agendar?\n\n📅 Agendar: {link}";
+          template = "Ola {nome}! Esta chegando a hora da sua manutencao de {servico}. Que tal agendar?\n\nAgendar: {link}";
         } else if (booking.triggerType === "reactivation_30d" && (!template || template.trim() === "")) {
-          template = "Olá {nome}! Sentimos sua falta por aqui. Que tal reservar seu próximo atendimento?\n\n📅 Agendar: {link}";
+          template = "Ola {nome}! Sentimos sua falta por aqui. Que tal reservar seu proximo atendimento?\n\nAgendar: {link}";
         }
 
         const finalMessage = replaceVars(template, {
@@ -235,7 +220,7 @@ serve(async (req) => {
           data: bookingDate.toLocaleDateString("pt-BR"),
           horario: bookingDate.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }),
           link: bookingLink,
-          link_avaliacao: reviewLink,
+          link_avaliacao: "",
         });
 
         const sendResult = await sendWhatsAppMessage({
@@ -318,7 +303,7 @@ serve(async (req) => {
 
       const bookingDate = new Date(String(booking.start_time));
       const message =
-        `Atenção! A cliente ${booking.client_name || "Cliente"} tem atendimento em ${bookingDate.toLocaleDateString("pt-BR")} às ` +
+        `Atencao! A cliente ${booking.client_name || "Cliente"} tem atendimento em ${bookingDate.toLocaleDateString("pt-BR")} as ` +
         `${bookingDate.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}. ` +
         `Confira no WhatsApp e na conta do banco se o sinal de ${Number(booking.signal_amount || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })} foi recebido.`;
 

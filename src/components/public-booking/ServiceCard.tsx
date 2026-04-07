@@ -1,8 +1,9 @@
 import { Heart } from "lucide-react";
+import type { PublicPageTheme } from "@/lib/public-page-theme";
 import { cn } from "@/lib/utils";
 
 type ServiceCardProps = {
-  accent: string;
+  theme: PublicPageTheme;
   badge?: string;
   description?: string | null;
   durationLabel: string;
@@ -16,7 +17,7 @@ type ServiceCardProps = {
 };
 
 export function ServiceCard({
-  accent,
+  theme,
   badge,
   description,
   durationLabel,
@@ -32,48 +33,61 @@ export function ServiceCard({
     <article
       className={cn(
         "relative rounded-[24px] border p-3.5 transition-all",
-        selected
-          ? "border-transparent bg-white shadow-[0_22px_48px_-24px_rgba(190,24,93,0.45)]"
-          : "border-[#eed8eb] bg-white shadow-[0_14px_30px_-24px_rgba(15,23,42,0.32)]",
+        selected ? "shadow-[0_22px_48px_-24px_rgba(190,24,93,0.45)]" : "shadow-[0_14px_30px_-24px_rgba(15,23,42,0.32)]",
       )}
-      style={selected ? { boxShadow: `0 24px 48px -24px ${accent}66` } : undefined}
+      style={{
+        borderColor: selected ? theme.accent : theme.border,
+        backgroundColor: theme.surface,
+        boxShadow: selected ? `0 24px 48px -24px ${theme.accentShadow}` : undefined,
+      }}
     >
       <button
         type="button"
         aria-label={favorite ? "Desfavoritar servico" : "Favoritar servico"}
         onClick={onToggleFavorite}
-        className={cn(
-          "absolute right-3 top-3 flex h-8 w-8 items-center justify-center rounded-full border transition",
-          favorite
-            ? "border-[#efb7dd] bg-[#fff1fb] text-[#ba1f8d]"
-            : "border-[#f1e4ef] bg-white text-slate-400",
-        )}
+        className="absolute right-3 top-3 flex h-8 w-8 items-center justify-center rounded-full border transition"
+        style={{
+          borderColor: favorite ? theme.accentFaint : theme.border,
+          backgroundColor: favorite ? theme.surfaceMuted : theme.surface,
+          color: favorite ? theme.accent : theme.textSoft,
+        }}
       >
         <Heart size={15} className={favorite ? "fill-current" : ""} />
       </button>
 
       {badge ? (
-        <span className="absolute bottom-3 left-3 rounded-full bg-[#ba1f8d] px-2.5 py-1 text-[9px] font-bold uppercase tracking-[0.28em] text-white">
+        <span
+          className="absolute bottom-3 left-3 rounded-full px-2.5 py-1 text-[9px] font-bold uppercase tracking-[0.28em]"
+          style={{ background: theme.accentGradient, color: theme.inverseText }}
+        >
           {badge}
         </span>
       ) : null}
 
       <div className="flex min-h-[62px] items-start gap-3 pr-8">
-        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-[16px] bg-[#fdf2fa] text-2xl shadow-inner">
+        <div
+          className="flex h-12 w-12 shrink-0 items-center justify-center rounded-[16px] text-2xl shadow-inner"
+          style={{ backgroundColor: theme.surfaceMuted }}
+        >
           <span aria-hidden>{icon}</span>
         </div>
         <div className="min-w-0">
-          <h3 className="text-[14px] font-bold leading-5 text-slate-900">{name}</h3>
-          <p className="mt-1 text-[11px] font-medium leading-4 text-slate-400">{description || "Atendimento personalizado"}</p>
+          <h3 className="text-[14px] font-bold leading-5" style={{ color: theme.text }}>{name}</h3>
+          <p className="mt-1 text-[11px] font-medium leading-4" style={{ color: theme.textMuted }}>
+            {description || "Atendimento personalizado"}
+          </p>
         </div>
       </div>
 
       <div className="mt-3 flex items-end justify-between gap-3">
         <div>
-          <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-400">A partir de</p>
-          <p className="mt-1 text-[15px] font-black text-slate-900">{priceLabel}</p>
+          <p className="text-[10px] font-semibold uppercase tracking-[0.22em]" style={{ color: theme.textSoft }}>A partir de</p>
+          <p className="mt-1 text-[15px] font-black" style={{ color: theme.text }}>{priceLabel}</p>
         </div>
-        <span className="rounded-full bg-[#faf4f9] px-3 py-1.5 text-[11px] font-semibold text-slate-500">
+        <span
+          className="rounded-full px-3 py-1.5 text-[11px] font-semibold"
+          style={{ backgroundColor: theme.surfaceAlt, color: theme.textMuted }}
+        >
           {durationLabel}
         </span>
       </div>
@@ -83,9 +97,13 @@ export function ServiceCard({
         onClick={onToggleSelect}
         className={cn(
           "mt-4 h-11 w-full rounded-full text-[13px] font-bold transition",
-          selected ? "text-white" : "bg-[#faf4f9] text-[#7f5b79]",
+          selected ? "" : "",
         )}
-        style={selected ? { background: `linear-gradient(90deg, ${accent}, #ff9db8)` } : undefined}
+        style={
+          selected
+            ? { background: theme.accentGradient, color: theme.inverseText }
+            : { backgroundColor: theme.surfaceAlt, color: theme.textMuted }
+        }
       >
         {selected ? "Remover" : "Selecionar"}
       </button>
