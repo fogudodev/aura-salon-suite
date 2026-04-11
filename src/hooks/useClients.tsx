@@ -62,6 +62,13 @@ export const useDeleteClient = () => {
 
   return useMutation({
     mutationFn: async (id: string) => {
+      // Preserve campaign history by detaching legacy campaign contacts before deleting the client.
+      const { error: detachCampaignContactsError } = await api
+        .from("campaign_contacts")
+        .update({ client_id: null })
+        .eq("client_id", id);
+      if (detachCampaignContactsError) throw detachCampaignContactsError;
+
       const { error } = await api.from("clients").delete().eq("id", id);
       if (error) throw error;
     },
