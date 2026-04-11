@@ -8,10 +8,56 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
+type BodyParseResult = {
+  ok: boolean;
+  data: Record<string, unknown>;
+  error?: string;
+};
+
+type WaitlistCandidate = {
+  name: string;
+  phone: string;
+  waitlistEntryId: string | null;
+};
+
+function jsonResponse(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
+}
+
+async function parseJsonBody(req: Request): Promise<BodyParseResult> {
+  try {
+    const raw = await req.text();
+    if (!raw.trim()) {
+      return { ok: true, data: {} };
+    }
+
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return { ok: false, data: {}, error: "Request body must be a JSON object" };
+    }
+
+    return { ok: true, data: parsed as Record<string, unknown> };
+  } catch {
+    return { ok: false, data: {}, error: "Invalid JSON body" };
+  }
+}
+
+function asString(value: unknown) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function isValidDateTime(value: string) {
+  if (!value) return false;
+  return !Number.isNaN(new Date(value).getTime());
+}
+
 function normalizePhone(phone: string): string {
   const digits = phone.replace(/\D/g, "");
   if (digits.startsWith("55") && digits.length >= 12 && digits.length <= 13) return digits;
-  if (digits.length >= 10 && digits.length <= 11) return "55" + digits;
+  if (digits.length >= 10 && digits.length <= 11) return `55${digits}`;
   return digits;
 }
 
@@ -23,363 +69,448 @@ serve(async (req) => {
   const supabase = createClient(
     Deno.env.get("SUPABASE_URL") ?? "",
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
-    { auth: { persistSession: false } }
+    { auth: { persistSession: false } },
   );
 
   try {
-    const { action, ...params } = await req.json();
+    const parsedBody = await parseJsonBody(req);
+    if (!parsedBody.ok) {
+      return jsonResponse({ success: false, error: parsedBody.error }, 400);
+    }
+
+    const action = asString(parsedBody.data.action);
+    if (!action) {
+      return jsonResponse({ success: false, error: "action is required" }, 400);
+    }
+
+    const params = parsedBody.data;
 
     if (action === "process-cancellation") {
-      const { professionalId, bookingId, serviceId, startTime, endTime, employeeId } = params;
+      const professionalId = asString(params.professionalId);
+      const bookingId = asString(params.bookingId) || null;
+      const serviceId = asString(params.serviceId);
+      const startTime = asString(params.startTime);
+      const endTime = asString(params.endTime);
 
-      // 1. Check waitlist settings
-      const { data: settings } = await supabase
+      if (!professionalId || !serviceId || !startTime || !endTime) {
+        return jsonResponse({
+          success: false,
+          error: "professionalId, serviceId, startTime and endTime are required",
+        }, 400);
+      }
+
+      if (!isValidDateTime(startTime) || !isValidDateTime(endTime)) {
+        return jsonResponse({ success: false, error: "startTime or endTime is invalid" }, 400);
+      }
+
+      const { data: settings, error: settingsError } = await supabase
         .from("waitlist_settings")
         .select("*")
         .eq("professional_id", professionalId)
         .maybeSingle();
+      if (settingsError) throw settingsError;
 
-      if (settings && !settings.enabled) {
-        return json({ success: false, reason: "waitlist_disabled" });
+      // Conservative fail-closed behavior: if settings were never created, skip processing.
+      if (!settings) {
+        return jsonResponse({
+          success: true,
+          skipped: true,
+          reason: "waitlist_settings_missing",
+        });
       }
 
-      const maxNotifications = settings?.max_notifications || 3;
-      const reservationMinutes = settings?.reservation_minutes || 3;
+      if (settings.enabled === false) {
+        return jsonResponse({
+          success: true,
+          skipped: true,
+          reason: "waitlist_disabled",
+        });
+      }
 
-      // 2. Find matching waitlist entries (active, same service, compatible date)
+      const maxNotifications = Number(settings.max_notifications || 3);
+      const reservationMinutes = Number(settings.reservation_minutes || 3);
+
       const slotDate = new Date(startTime);
       const dateStr = slotDate.toISOString().split("T")[0];
       const hour = slotDate.getHours();
       const period = hour < 12 ? "morning" : hour < 18 ? "afternoon" : "evening";
 
-      const query = supabase
+      const { data: allEntries, error: entriesError } = await supabase
         .from("waitlist")
         .select("*, clients(id, name, phone)")
         .eq("professional_id", professionalId)
         .eq("status", "waiting")
-        .or(`service_id.eq.${serviceId},service_id.is.null`);
-
-      // Filter by preferred date (exact match or any)
-      const { data: allEntries } = await query.order("priority", { ascending: false }).order("created_at", { ascending: true });
+        .or(`service_id.eq.${serviceId},service_id.is.null`)
+        .order("priority", { ascending: false })
+        .order("created_at", { ascending: true });
+      if (entriesError) throw entriesError;
 
       if (!allEntries || allEntries.length === 0) {
-        // 3. Fallback: find clients who previously booked this service (AI recommendation)
-        const candidates = await findSmartCandidates(supabase, professionalId, serviceId, startTime);
-        if (candidates.length === 0) {
-          return json({ success: false, reason: "no_candidates" });
+        const smart = await findSmartCandidates(supabase, professionalId, serviceId);
+        if (smart.length === 0) {
+          return jsonResponse({ success: false, reason: "no_candidates" }, 404);
         }
-        // Send offers to smart candidates
+
         const sent = await sendOffers(
-          supabase, professionalId, serviceId, startTime, endTime,
-          candidates.slice(0, maxNotifications), reservationMinutes, null
+          supabase,
+          professionalId,
+          serviceId,
+          startTime,
+          endTime,
+          smart.slice(0, maxNotifications),
+          reservationMinutes,
+          null,
         );
-        return json({ success: true, offers_sent: sent });
+
+        return jsonResponse({ success: true, offers_sent: sent, source: "smart_candidates" });
       }
 
-      // 4. Filter entries by date/period compatibility
-      const compatible = allEntries.filter((e: any) => {
-        if (e.preferred_date !== dateStr) return false;
-        if (e.preferred_period === "any") return true;
-        return e.preferred_period === period;
+      const compatible = allEntries.filter((entry: Record<string, unknown>) => {
+        const preferredDate = asString(entry.preferred_date);
+        const preferredPeriod = asString(entry.preferred_period) || "any";
+        if (preferredDate && preferredDate !== dateStr) return false;
+        if (preferredPeriod === "any") return true;
+        return preferredPeriod === period;
       });
 
-      // If no date-compatible entries, try entries with any date preference
-      const candidates = compatible.length > 0 ? compatible : allEntries.filter((e: any) => {
-        return e.preferred_period === "any" || e.preferred_period === period;
-      });
+      const candidates = compatible.length > 0
+        ? compatible
+        : allEntries.filter((entry: Record<string, unknown>) => {
+          const preferredPeriod = asString(entry.preferred_period) || "any";
+          return preferredPeriod === "any" || preferredPeriod === period;
+        });
 
       if (candidates.length === 0) {
-        // Try smart AI candidates
-        const smartCandidates = await findSmartCandidates(supabase, professionalId, serviceId, startTime);
-        if (smartCandidates.length > 0) {
+        const smart = await findSmartCandidates(supabase, professionalId, serviceId);
+        if (smart.length > 0) {
           const sent = await sendOffers(
-            supabase, professionalId, serviceId, startTime, endTime,
-            smartCandidates.slice(0, maxNotifications), reservationMinutes, null
+            supabase,
+            professionalId,
+            serviceId,
+            startTime,
+            endTime,
+            smart.slice(0, maxNotifications),
+            reservationMinutes,
+            null,
           );
-          return json({ success: true, offers_sent: sent, source: "ai" });
+          return jsonResponse({ success: true, offers_sent: sent, source: "smart_candidates" });
         }
-        return json({ success: false, reason: "no_compatible_candidates" });
+
+        return jsonResponse({ success: false, reason: "no_compatible_candidates" }, 404);
       }
 
-      // 5. Rank candidates by priority
-      const ranked = rankCandidates(candidates, settings?.prioritize_vip !== false);
+      const ranked = rankCandidates(candidates, settings.prioritize_vip !== false);
       const toNotify = ranked.slice(0, maxNotifications);
 
-      // 6. Send WhatsApp offers
-      const offerCandidates = toNotify.map((e: any) => ({
-        name: e.client_name,
-        phone: e.client_phone,
-        waitlistEntryId: e.id,
+      const offerCandidates: WaitlistCandidate[] = toNotify.map((entry: Record<string, unknown>) => ({
+        name: asString(entry.client_name) || "Cliente",
+        phone: asString(entry.client_phone),
+        waitlistEntryId: asString(entry.id) || null,
       }));
+
       const sent = await sendOffers(
-        supabase, professionalId, serviceId, startTime, endTime,
-        offerCandidates, reservationMinutes, bookingId
+        supabase,
+        professionalId,
+        serviceId,
+        startTime,
+        endTime,
+        offerCandidates,
+        reservationMinutes,
+        bookingId,
       );
 
-      // 7. Update waitlist entries status to "notified"
       for (const entry of toNotify) {
-        await supabase
+        const entryId = asString((entry as Record<string, unknown>).id);
+        if (!entryId) continue;
+
+        const { error: updateEntryError } = await supabase
           .from("waitlist")
           .update({ status: "notified", notified_at: new Date().toISOString() })
-          .eq("id", entry.id);
+          .eq("id", entryId);
+        if (updateEntryError) throw updateEntryError;
       }
 
-      return json({ success: true, offers_sent: sent, source: "waitlist" });
+      return jsonResponse({ success: true, offers_sent: sent, source: "waitlist" });
     }
 
     if (action === "accept-offer") {
-      const { offerId, clientPhone } = params;
+      const offerId = asString(params.offerId);
+      const clientPhone = asString(params.clientPhone);
+      if (!offerId) {
+        return jsonResponse({ success: false, error: "offerId is required" }, 400);
+      }
 
-      // Find the offer
-      const { data: offer, error: offerErr } = await supabase
+      const { data: offer, error: offerError } = await supabase
         .from("waitlist_offers")
         .select("*")
         .eq("id", offerId)
-        .single();
-
-      if (offerErr || !offer) {
-        return json({ success: false, error: "Oferta não encontrada" });
+        .maybeSingle();
+      if (offerError) throw offerError;
+      if (!offer) {
+        return jsonResponse({ success: false, error: "Offer not found" }, 404);
       }
 
       if (offer.status !== "sent") {
-        return json({ success: false, error: "Esta oferta já foi respondida" });
+        return jsonResponse({ success: false, error: "Offer already handled" }, 400);
       }
 
-      // Check if reserved_until has passed
       if (offer.reserved_until && new Date(offer.reserved_until) < new Date()) {
-        await supabase.from("waitlist_offers").update({ status: "expired" }).eq("id", offerId);
-        return json({ success: false, error: "Tempo de reserva expirou" });
+        const { error: expireError } = await supabase
+          .from("waitlist_offers")
+          .update({ status: "expired" })
+          .eq("id", offerId);
+        if (expireError) throw expireError;
+        return jsonResponse({ success: false, error: "Offer reservation expired" }, 400);
       }
 
-      // Check if slot is still available
-      const { data: conflicts } = await supabase
+      const { data: conflicts, error: conflictError } = await supabase
         .from("bookings")
         .select("id")
         .eq("professional_id", offer.professional_id)
         .neq("status", "cancelled")
         .lt("start_time", offer.slot_end)
         .gt("end_time", offer.slot_start);
+      if (conflictError) throw conflictError;
 
       if (conflicts && conflicts.length > 0) {
-        await supabase.from("waitlist_offers").update({ status: "slot_taken" }).eq("id", offerId);
-        return json({ success: false, error: "Horário já foi preenchido" });
+        const { error: takenError } = await supabase
+          .from("waitlist_offers")
+          .update({ status: "slot_taken" })
+          .eq("id", offerId);
+        if (takenError) throw takenError;
+        return jsonResponse({ success: false, error: "Slot already taken" }, 409);
       }
 
-      // Create the booking
-      const { data: service } = await supabase
+      const { data: service, error: serviceError } = await supabase
         .from("services")
         .select("price, duration_minutes")
         .eq("id", offer.service_id)
-        .single();
+        .maybeSingle();
+      if (serviceError) throw serviceError;
 
-      // Find or create client
-      let clientId = null;
-      const { data: existingClient } = await supabase
+      const normalizedClientPhone = normalizePhone(clientPhone || offer.client_phone || "");
+      if (!normalizedClientPhone) {
+        return jsonResponse({ success: false, error: "Client phone is invalid" }, 400);
+      }
+
+      let clientId: string | null = null;
+      const { data: existingClient, error: existingClientError } = await supabase
         .from("clients")
         .select("id")
         .eq("professional_id", offer.professional_id)
-        .eq("phone", normalizePhone(clientPhone || offer.client_phone))
+        .eq("phone", normalizedClientPhone)
         .maybeSingle();
+      if (existingClientError) throw existingClientError;
 
       if (existingClient) {
-        clientId = existingClient.id;
+        clientId = String(existingClient.id);
       } else {
-        const { data: newClient } = await supabase
+        const { data: newClient, error: newClientError } = await supabase
           .from("clients")
           .insert({
             professional_id: offer.professional_id,
-            name: offer.client_name,
-            phone: normalizePhone(offer.client_phone),
+            name: offer.client_name || "Cliente",
+            phone: normalizedClientPhone,
           })
           .select("id")
           .single();
-        clientId = newClient?.id;
+        if (newClientError) throw newClientError;
+        clientId = newClient?.id ? String(newClient.id) : null;
       }
 
-      const { data: booking, error: bookErr } = await supabase
+      const { data: booking, error: bookingError } = await supabase
         .from("bookings")
         .insert({
           professional_id: offer.professional_id,
           service_id: offer.service_id,
           client_id: clientId,
           client_name: offer.client_name,
-          client_phone: offer.client_phone,
+          client_phone: normalizedClientPhone,
           start_time: offer.slot_start,
           end_time: offer.slot_end,
-          price: service?.price || 0,
-          duration_minutes: service?.duration_minutes || 30,
+          price: Number(service?.price || 0),
+          duration_minutes: Number(service?.duration_minutes || 30),
           status: "confirmed",
         })
         .select("id")
         .single();
+      if (bookingError) throw bookingError;
 
-      if (bookErr) {
-        return json({ success: false, error: "Erro ao criar agendamento" });
-      }
+      const { error: updateOfferError } = await supabase
+        .from("waitlist_offers")
+        .update({
+          status: "accepted",
+          responded_at: new Date().toISOString(),
+          created_booking_id: booking.id,
+        })
+        .eq("id", offerId);
+      if (updateOfferError) throw updateOfferError;
 
-      // Update offer status
-      await supabase.from("waitlist_offers").update({
-        status: "accepted",
-        responded_at: new Date().toISOString(),
-        created_booking_id: booking.id,
-      }).eq("id", offerId);
-
-      // Expire other offers for same slot
-      await supabase.from("waitlist_offers").update({ status: "slot_taken" })
+      const { error: expireOthersError } = await supabase
+        .from("waitlist_offers")
+        .update({ status: "slot_taken" })
         .eq("professional_id", offer.professional_id)
         .eq("slot_start", offer.slot_start)
         .neq("id", offerId)
         .eq("status", "sent");
+      if (expireOthersError) throw expireOthersError;
 
-      // Update waitlist entry if linked
       if (offer.waitlist_entry_id) {
-        await supabase.from("waitlist").update({ status: "booked" }).eq("id", offer.waitlist_entry_id);
+        const { error: waitlistBookedError } = await supabase
+          .from("waitlist")
+          .update({ status: "booked" })
+          .eq("id", offer.waitlist_entry_id);
+        if (waitlistBookedError) throw waitlistBookedError;
       }
 
-      return json({ success: true, booking_id: booking.id });
+      return jsonResponse({ success: true, booking_id: booking.id });
     }
 
-    return json({ error: "Unknown action" }, 400);
+    return jsonResponse({ success: false, error: "Unknown action" }, 400);
   } catch (error) {
-    console.error("Waitlist process error:", error);
-    return new Response(JSON.stringify({ error: error.message }), {
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-      status: 500,
-    });
+    console.error("waitlist-process unexpected error:", error);
+    return jsonResponse({ success: false, error: "Internal server error" }, 500);
   }
 });
 
-function json(data: any, status = 200) {
-  return new Response(JSON.stringify(data), {
-    headers: { ...corsHeaders, "Content-Type": "application/json" },
-    status,
-  });
-}
-
-function rankCandidates(candidates: any[], prioritizeVip: boolean): any[] {
+function rankCandidates(candidates: Record<string, unknown>[], _prioritizeVip: boolean): Record<string, unknown>[] {
   return [...candidates].sort((a, b) => {
-    // Higher priority first
-    if (b.priority !== a.priority) return b.priority - a.priority;
-    // Earlier entries first (FIFO)
-    return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+    const priorityA = Number(a.priority || 0);
+    const priorityB = Number(b.priority || 0);
+    if (priorityB !== priorityA) return priorityB - priorityA;
+    return new Date(asString(a.created_at)).getTime() - new Date(asString(b.created_at)).getTime();
   });
 }
 
 async function findSmartCandidates(
-  supabase: any, professionalId: string, serviceId: string, startTime: string
-): Promise<Array<{ name: string; phone: string; waitlistEntryId: string | null }>> {
-  // Find clients who booked this service before and haven't booked recently
+  supabase: ReturnType<typeof createClient>,
+  professionalId: string,
+  serviceId: string,
+): Promise<WaitlistCandidate[]> {
   const thirtyDaysAgo = new Date();
   thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
-  const { data: pastClients } = await supabase
+  const { data: pastClients, error: pastClientsError } = await supabase
     .from("bookings")
-    .select("client_name, client_phone, client_id")
+    .select("client_name, client_phone")
     .eq("professional_id", professionalId)
     .eq("service_id", serviceId)
     .eq("status", "completed")
     .lt("start_time", thirtyDaysAgo.toISOString())
     .order("start_time", { ascending: false })
     .limit(20);
+  if (pastClientsError) throw pastClientsError;
 
   if (!pastClients || pastClients.length === 0) return [];
 
-  // Deduplicate by phone
-  const seen = new Set<string>();
-  const unique = [];
-  for (const c of pastClients) {
-    const phone = normalizePhone(c.client_phone || "");
-    if (!phone || seen.has(phone)) continue;
-    seen.add(phone);
+  const seenPhones = new Set<string>();
+  const candidates: WaitlistCandidate[] = [];
 
-    // Check if they already have an upcoming booking
-    const { data: upcoming } = await supabase
+  for (const row of pastClients) {
+    const normalizedPhone = normalizePhone(asString(row.client_phone || ""));
+    if (!normalizedPhone || seenPhones.has(normalizedPhone)) continue;
+    seenPhones.add(normalizedPhone);
+
+    const { data: upcoming, error: upcomingError } = await supabase
       .from("bookings")
       .select("id")
       .eq("professional_id", professionalId)
-      .eq("client_phone", c.client_phone)
+      .eq("client_phone", normalizedPhone)
       .gte("start_time", new Date().toISOString())
       .neq("status", "cancelled")
       .limit(1);
+    if (upcomingError) throw upcomingError;
 
     if (!upcoming || upcoming.length === 0) {
-      unique.push({ name: c.client_name, phone: c.client_phone, waitlistEntryId: null });
+      candidates.push({
+        name: asString(row.client_name || "") || "Cliente",
+        phone: normalizedPhone,
+        waitlistEntryId: null,
+      });
     }
-    if (unique.length >= 5) break;
+
+    if (candidates.length >= 5) break;
   }
 
-  return unique;
+  return candidates;
 }
 
 async function sendOffers(
-  supabase: any, professionalId: string, serviceId: string,
-  startTime: string, endTime: string,
-  candidates: Array<{ name: string; phone: string; waitlistEntryId: string | null }>,
-  reservationMinutes: number, cancelledBookingId: string | null
+  supabase: ReturnType<typeof createClient>,
+  professionalId: string,
+  serviceId: string,
+  startTime: string,
+  endTime: string,
+  candidates: WaitlistCandidate[],
+  reservationMinutes: number,
+  cancelledBookingId: string | null,
 ): Promise<number> {
-  // Get WhatsApp instance
-  const { data: inst } = await supabase
+  const { data: instance, error: instanceError } = await supabase
     .from("whatsapp_instances")
-    .select("instance_name, status")
+    .select("professional_id, instance_name, meta_phone_id, status")
     .eq("professional_id", professionalId)
-    .single();
+    .maybeSingle();
+  if (instanceError) throw instanceError;
+  if (!instance || instance.status !== "connected") return 0;
 
-  if (!inst || inst.status !== "connected") return 0;
-
-  // Get professional info
-  const { data: prof } = await supabase
+  const { data: professional, error: professionalError } = await supabase
     .from("professionals")
     .select("name, business_name, slug")
     .eq("id", professionalId)
-    .single();
+    .maybeSingle();
+  if (professionalError) throw professionalError;
 
-  // Get service name
-  const { data: service } = await supabase
+  const { data: service, error: serviceError } = await supabase
     .from("services")
     .select("name, price")
     .eq("id", serviceId)
-    .single();
+    .maybeSingle();
+  if (serviceError) throw serviceError;
 
   const slotDate = new Date(startTime);
   const dateFormatted = slotDate.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
   const timeFormatted = slotDate.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
-  const businessName = prof?.business_name || prof?.name || "Salão";
-  const bookingLink = prof?.slug ? `https://gende.io/${prof.slug}` : "";
+  const businessName = professional?.business_name || professional?.name || "Salao";
+  const bookingLink = professional?.slug ? `https://gende.io/${professional.slug}` : "";
 
   let sent = 0;
 
   for (const candidate of candidates) {
+    const phone = normalizePhone(candidate.phone || "");
+    if (!phone) continue;
+
     const reservedUntil = new Date(Date.now() + reservationMinutes * 60 * 1000);
+    const { data: offer, error: offerError } = await supabase
+      .from("waitlist_offers")
+      .insert({
+        professional_id: professionalId,
+        waitlist_entry_id: candidate.waitlistEntryId,
+        booking_id: cancelledBookingId,
+        client_name: candidate.name || "Cliente",
+        client_phone: phone,
+        service_id: serviceId,
+        slot_start: startTime,
+        slot_end: endTime,
+        status: "sent",
+        reserved_until: reservedUntil.toISOString(),
+      })
+      .select("id")
+      .single();
+    if (offerError) throw offerError;
 
-    // Create offer record
-    const { data: offer } = await supabase.from("waitlist_offers").insert({
-      professional_id: professionalId,
-      waitlist_entry_id: candidate.waitlistEntryId,
-      booking_id: cancelledBookingId,
-      client_name: candidate.name,
-      client_phone: candidate.phone,
-      service_id: serviceId,
-      slot_start: startTime,
-      slot_end: endTime,
-      status: "sent",
-      reserved_until: reservedUntil.toISOString(),
-    }).select("id").single();
+    const message = `✨ *Horario disponivel!*
 
-    // Send WhatsApp message
-    const phone = normalizePhone(candidate.phone);
-    const message = `✨ *Horário disponível!*
+Ola ${candidate.name || "Cliente"}! Acabou de abrir um horario:
 
-Olá ${candidate.name}! Acabou de abrir um horário:
-
-📅 *${dateFormatted}* às *${timeFormatted}*
-💇 *${service?.name || "Serviço"}*
+📅 *${dateFormatted}* as *${timeFormatted}*
+💇 *${service?.name || "Servico"}*
 📍 ${businessName}
 
-Gostaria de aproveitar esse horário?
+Gostaria de aproveitar esse horario?
 
 ${bookingLink ? `📲 Agende agora: ${bookingLink}` : "Entre em contato para confirmar!"}
 
-⏰ Responda rápido, a vaga é limitada!`;
+⏰ Responda rapido, a vaga e limitada!`;
 
     try {
       const sendResult = await sendWhatsAppMessage({
@@ -387,20 +518,31 @@ ${bookingLink ? `📲 Agende agora: ${bookingLink}` : "Entre em contato para con
         professionalId,
         recipient: phone,
         message,
-        instance: inst,
+        instance,
         preferredProvider: "evolution",
         details: {
           source: "waitlist_offer",
-          offer_id: offer?.id || null,
+          offer_id: offer.id,
           cancelled_booking_id: cancelledBookingId,
         },
       });
 
       if (sendResult.success) {
-        sent++;
+        sent += 1;
+      } else {
+        const { error: offerStatusError } = await supabase
+          .from("waitlist_offers")
+          .update({ status: "failed" })
+          .eq("id", offer.id);
+        if (offerStatusError) throw offerStatusError;
       }
-    } catch (e) {
-      console.error("Error sending waitlist offer:", e);
+    } catch (error) {
+      console.error("waitlist-process send offer unexpected error:", error);
+      const { error: offerStatusError } = await supabase
+        .from("waitlist_offers")
+        .update({ status: "failed" })
+        .eq("id", offer.id);
+      if (offerStatusError) throw offerStatusError;
     }
   }
 

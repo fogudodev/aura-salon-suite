@@ -41,6 +41,28 @@ const normalizeClientPhone = (phone?: string | null) => {
   return `55${digits}`;
 };
 
+type InvokeErrorDetails = {
+  status?: number;
+  payload?: Record<string, unknown> | null;
+};
+
+const parseFunctionInvokeError = async (error: unknown): Promise<InvokeErrorDetails> => {
+  const context = (error as { context?: unknown } | null)?.context;
+  const response = context instanceof Response ? context : null;
+  if (!response) return {};
+
+  try {
+    const parsed = await response.clone().json();
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return { status: response.status, payload: parsed as Record<string, unknown> };
+    }
+  } catch {
+    // ignore malformed error payload
+  }
+
+  return { status: response.status, payload: null };
+};
+
 const enrichBookingsWithServices = async (bookings: BookingRow[] | null | undefined) => {
   if (!bookings?.length) return bookings || [];
 
@@ -497,17 +519,37 @@ export const useUpdateBooking = () => {
 
       // If booking was cancelled, trigger waitlist processing
       if (data && data.status === "cancelled") {
-        api.functions.invoke("waitlist-process", {
-          body: {
-            action: "process-cancellation",
-            professionalId: data.professional_id,
-            bookingId: data.id,
-            serviceId: data.service_id,
-            startTime: data.start_time,
-            endTime: data.end_time,
-            employeeId: data.employee_id,
-          },
-        }).catch((err) => { console.error("Waitlist process error:", err); });
+        (async () => {
+          const { error } = await api.functions.invoke("waitlist-process", {
+            body: {
+              action: "process-cancellation",
+              professionalId: data.professional_id,
+              bookingId: data.id,
+              serviceId: data.service_id,
+              startTime: data.start_time,
+              endTime: data.end_time,
+              employeeId: data.employee_id,
+            },
+          });
+
+          if (!error) return;
+
+          const details = await parseFunctionInvokeError(error);
+          const reason = String(details.payload?.reason || "");
+
+          const isFunctionalNoCandidate =
+            details.status === 404 &&
+            (reason === "no_candidates" || reason === "no_compatible_candidates");
+          if (isFunctionalNoCandidate) return;
+
+          console.error("Waitlist process error:", {
+            status: details.status,
+            reason: reason || String(details.payload?.error || ""),
+            raw: error,
+          });
+        })().catch((err) => {
+          console.error("Waitlist process unexpected caller error:", err);
+        });
 
         // Delete from Google Calendar if linked
         if (data.google_calendar_event_id) {

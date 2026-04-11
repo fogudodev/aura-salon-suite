@@ -1,7 +1,96 @@
-import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api-client";
 import { useProfessional } from "./useProfessional";
+
+type FunctionErrorContext = {
+  status?: number;
+  payload?: Record<string, unknown> | null;
+  message: string;
+};
+
+type SendCampaignAction = "get-limits" | "create-campaign";
+
+async function parseInvokeError(error: unknown): Promise<FunctionErrorContext> {
+  const fallbackMessage = error instanceof Error ? error.message : "Request failed";
+  const context = (error as { context?: unknown } | null)?.context;
+  const response = context instanceof Response ? context : null;
+
+  if (!response) {
+    return { message: fallbackMessage };
+  }
+
+  let payload: Record<string, unknown> | null = null;
+  try {
+    const parsed = await response.clone().json();
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      payload = parsed as Record<string, unknown>;
+    }
+  } catch {
+    payload = null;
+  }
+
+  const payloadError = typeof payload?.error === "string" ? payload.error : "";
+  return {
+    status: response.status,
+    payload,
+    message: payloadError || fallbackMessage,
+  };
+}
+
+async function getAccessTokenOrThrow() {
+  const { data, error } = await api.auth.getSession();
+  if (error) {
+    throw new Error("Não foi possível validar sua sessão");
+  }
+
+  const token = data.session?.access_token;
+  if (!token) {
+    throw new Error("Sua sessão expirou. Faça login novamente");
+  }
+
+  return token;
+}
+
+async function invokeSendCampaign<T>(
+  action: SendCampaignAction,
+  professionalId: string,
+  payload: Record<string, unknown> = {},
+): Promise<T> {
+  if (!professionalId) {
+    throw new Error("professionalId é obrigatório");
+  }
+
+  const token = await getAccessTokenOrThrow();
+  const { data, error } = await api.functions.invoke("send-campaign", {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    body: {
+      action,
+      professionalId,
+      ...payload,
+    },
+  });
+
+  if (error) {
+    const parsed = await parseInvokeError(error);
+    if (parsed.status === 401) {
+      throw new Error("Sessão inválida. Entre novamente para continuar");
+    }
+    if (parsed.status === 403) {
+      throw new Error(
+        parsed.message || "Você não tem permissão ou seu plano não permite campanhas",
+      );
+    }
+    throw new Error(parsed.message || "Erro ao processar campanha");
+  }
+
+  if (data?.error) {
+    throw new Error(String(data.error));
+  }
+
+  return data as T;
+}
 
 export const useCampaigns = () => {
   const { data: professional } = useProfessional();
@@ -25,11 +114,7 @@ export const useCampaignLimits = () => {
   return useQuery({
     queryKey: ["campaign-limits", professional?.id],
     queryFn: async () => {
-      const { data, error } = await api.functions.invoke("send-campaign", {
-        body: { action: "get-limits", professionalId: professional!.id },
-      });
-      if (error) throw error;
-      return data;
+      return invokeSendCampaign<Record<string, unknown>>("get-limits", professional!.id);
     },
     enabled: !!professional?.id,
   });
@@ -39,12 +124,18 @@ export const useSendCampaign = () => {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (params: { professionalId: string; name: string; message: string; clientIds?: string[] }) => {
-      const { data, error } = await api.functions.invoke("send-campaign", {
-        body: { action: "create-campaign", ...params },
+      if (!params.professionalId) throw new Error("professionalId é obrigatório");
+      if (!params.name?.trim()) throw new Error("Nome da campanha é obrigatório");
+      if (!params.message?.trim()) throw new Error("Mensagem da campanha é obrigatória");
+      if (params.clientIds && !Array.isArray(params.clientIds)) {
+        throw new Error("clientIds deve ser um array");
+      }
+
+      return invokeSendCampaign<Record<string, unknown>>("create-campaign", params.professionalId, {
+        name: params.name,
+        message: params.message,
+        clientIds: params.clientIds || [],
       });
-      if (error) throw error;
-      if (data?.error) throw new Error(data.error);
-      return data;
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["campaigns"] });
