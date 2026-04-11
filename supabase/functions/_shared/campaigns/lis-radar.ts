@@ -11,6 +11,45 @@ function buildCooldownKey(professionalId: string, dedupeKey: string) {
   return `${professionalId}:${dedupeKey}`;
 }
 
+function extractProviderMessageId(payload: unknown): string | null {
+  if (!payload || typeof payload !== "object") return null;
+  const record = payload as Record<string, unknown>;
+
+  const direct = record.messageId || record.id || record.message_id || record.msgId;
+  if (typeof direct === "string" && direct.trim()) return direct.trim();
+
+  if (Array.isArray(record.messages) && record.messages[0] && typeof record.messages[0] === "object") {
+    const nested = record.messages[0] as Record<string, unknown>;
+    if (typeof nested.id === "string" && nested.id.trim()) return nested.id.trim();
+  }
+
+  if (record.key && typeof record.key === "object") {
+    const keyRecord = record.key as Record<string, unknown>;
+    if (typeof keyRecord.id === "string" && keyRecord.id.trim()) return keyRecord.id.trim();
+  }
+
+  if (record.data && typeof record.data === "object") {
+    return extractProviderMessageId(record.data);
+  }
+
+  return null;
+}
+
+function buildProviderFailureReason(input: {
+  error?: string;
+  responseStatus?: number;
+  responseBody?: unknown;
+}) {
+  const parts: string[] = [];
+  if (input.error) parts.push(input.error);
+  if (input.responseStatus) parts.push(`status=${input.responseStatus}`);
+  if (!input.error && input.responseBody) {
+    const raw = typeof input.responseBody === "string" ? input.responseBody : JSON.stringify(input.responseBody);
+    if (raw) parts.push(raw);
+  }
+  return parts.join(" | ") || "notification_failed";
+}
+
 export async function syncLisRadarOpportunities(params: {
   supabase: SupabaseClient;
   professionalId: string;
@@ -104,7 +143,7 @@ export async function notifyProfessionalAboutOpportunity(params: {
   opportunityId: string;
 }) {
   const { supabase, professionalId, opportunityId } = params;
-  const [{ data: professional }, { data: opportunity }, { data: instance }] = await Promise.all([
+  const [{ data: professional }, { data: opportunity }, instanceRes] = await Promise.all([
     supabase
       .from("professionals")
       .select("id, name, business_name, phone")
@@ -118,14 +157,20 @@ export async function notifyProfessionalAboutOpportunity(params: {
       .single(),
     supabase
       .from("whatsapp_instances")
-      .select("*")
+      .select("professional_id, instance_name, meta_phone_id, status, updated_at")
       .eq("professional_id", professionalId)
       .eq("status", "connected")
+      .order("updated_at", { ascending: false })
+      .limit(1)
       .maybeSingle(),
   ]);
+  const instance = instanceRes.data;
 
   if (!opportunity || !professional) {
     throw new Error("Opportunity or professional not found");
+  }
+  if (instanceRes.error) {
+    throw instanceRes.error;
   }
 
   const cooldownKey = buildCooldownKey(professionalId, opportunity.dedupe_key);
@@ -218,18 +263,26 @@ export async function notifyProfessionalAboutOpportunity(params: {
       .from("lis_campaign_notifications")
       .update({
         status: "failed",
-        failure_reason: result.error || JSON.stringify(result.responseBody ?? {}),
+        failure_reason: buildProviderFailureReason({
+          error: result.error,
+          responseStatus: result.responseStatus,
+          responseBody: result.responseBody,
+        }),
+        provider: result.provider,
       })
       .eq("id", notificationInsert.data.id);
     return { success: false, error: result.error || "notification_failed" };
   }
 
+  const providerMessageId = extractProviderMessageId(result.responseBody ?? null);
   await Promise.all([
     supabase
       .from("lis_campaign_notifications")
       .update({
         status: "sent",
         provider: result.provider,
+        provider_message_id: providerMessageId,
+        failure_reason: null,
         sent_at: new Date().toISOString(),
       })
       .eq("id", notificationInsert.data.id),
