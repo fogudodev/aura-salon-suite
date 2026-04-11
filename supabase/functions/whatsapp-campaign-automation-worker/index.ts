@@ -2,6 +2,7 @@ import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { runActiveCampaignAutomations } from "../_shared/campaigns/automation-service.ts";
 import {
   createSupabaseAdminClient,
+  isFeatureEnabledForProfessional,
   invokeInternalWorker,
   isInternalWorkerAuthorized,
 } from "../_shared/campaigns/runtime-config.ts";
@@ -53,9 +54,36 @@ serve(async (req) => {
 
   try {
     const body = req.method === "POST" ? await req.json().catch(() => ({})) : {};
+    const supabase = createSupabaseAdminClient();
+    const professionalId = body.professionalId ? String(body.professionalId) : null;
+
+    if (professionalId) {
+      const enabled = await isFeatureEnabledForProfessional({
+        supabase,
+        professionalId,
+        featureKey: "campaigns",
+        requireGlobalEnabled: true,
+        defaultEnabledWhenFlagMissing: false,
+      });
+      if (!enabled) {
+        return json({
+          processed: 0,
+          completed: 0,
+          skipped: 0,
+          failed: 0,
+          autoStarted: 0,
+          generatedCampaigns: 0,
+          runs: [],
+          errors: [],
+          skippedByFeatureFlag: true,
+          professionalId,
+        });
+      }
+    }
+
     const result = await runActiveCampaignAutomations({
-      supabase: createSupabaseAdminClient(),
-      professionalId: body.professionalId ? String(body.professionalId) : null,
+      supabase,
+      professionalId,
       limit: Number(body.limit || 20),
     });
 

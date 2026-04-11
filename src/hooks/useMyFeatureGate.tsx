@@ -4,6 +4,7 @@ import { useProfessional } from "./useProfessional";
 import { useFeatureFlags } from "./useFeatureFlags";
 
 type Override = { feature_key: string; enabled: boolean };
+const REQUIRE_GLOBAL_ENABLE = new Set(["campaigns"]);
 
 /**
  * Checks both the global feature_flags table AND per-professional overrides.
@@ -38,6 +39,14 @@ export const useMyFeatureGate = () => {
 
   /** Returns true if the feature is disabled for this professional */
   const isFeatureDisabledForMe = (featureKey: string): boolean => {
+    // Some modules require explicit global activation by master admin.
+    if (REQUIRE_GLOBAL_ENABLE.has(featureKey)) {
+      if (!globalFlagMap.has(featureKey)) return true;
+      if (!globalFlagMap.get(featureKey)) return true;
+      if (overrideMap.has(featureKey)) return !overrideMap.get(featureKey)!;
+      return false;
+    }
+
     // Professional-level override takes highest priority
     if (overrideMap.has(featureKey)) return !overrideMap.get(featureKey)!;
     // Then check global flag
@@ -46,5 +55,11 @@ export const useMyFeatureGate = () => {
     return false;
   };
 
-  return { isFeatureDisabledForMe, isLoading: flagsLoading || overridesLoading };
+  const isFeatureEnabledForMe = (featureKey: string): boolean => !isFeatureDisabledForMe(featureKey);
+
+  return {
+    isFeatureDisabledForMe,
+    isFeatureEnabledForMe,
+    isLoading: flagsLoading || overridesLoading,
+  };
 };

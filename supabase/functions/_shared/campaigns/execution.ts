@@ -12,6 +12,7 @@ import {
 } from "./domain.ts";
 import { previewCampaignAudience } from "./audience-builder.ts";
 import { scoreAttributionCandidate, shouldReassignAttribution } from "./phase3-domain.ts";
+import { isFeatureEnabledForProfessional } from "./runtime-config.ts";
 
 type CampaignRow = {
   id: string;
@@ -102,6 +103,7 @@ const CAMPAIGN_ALLOWED_NEXT: Record<string, string[]> = {
 
 const RECIPIENT_TERMINAL = new Set(["failed", "booked", "opted_out", "skipped"]);
 const RECIPIENT_SEND_SUCCESS = new Set(["sent", "delivered", "read", "replied", "clicked", "booked"]);
+const CAMPAIGNS_FEATURE_KEY = "campaigns";
 
 function canTransitionCampaign(currentStatus: string, nextStatus: string) {
   if (currentStatus === nextStatus) return true;
@@ -115,6 +117,27 @@ function isRecipientTerminal(status: string) {
 
 function isRecipientAlreadySuccessful(status: string) {
   return RECIPIENT_SEND_SUCCESS.has(status);
+}
+
+async function isCampaignFeatureEnabled(params: {
+  supabase: SupabaseClient;
+  professionalId: string;
+  cache?: Map<string, boolean>;
+}) {
+  if (params.cache?.has(params.professionalId)) {
+    return params.cache.get(params.professionalId) === true;
+  }
+
+  const enabled = await isFeatureEnabledForProfessional({
+    supabase: params.supabase,
+    professionalId: params.professionalId,
+    featureKey: CAMPAIGNS_FEATURE_KEY,
+    requireGlobalEnabled: true,
+    defaultEnabledWhenFlagMissing: false,
+  });
+
+  params.cache?.set(params.professionalId, enabled);
+  return enabled;
 }
 
 async function fetchCampaign(
@@ -658,6 +681,14 @@ export async function startOrResumeCampaign(params: {
   professionalId: string;
   campaignId: string;
 }) {
+  const featureEnabled = await isCampaignFeatureEnabled({
+    supabase: params.supabase,
+    professionalId: params.professionalId,
+  });
+  if (!featureEnabled) {
+    throw new Error("Campanhas desativadas para esta profissional.");
+  }
+
   const campaign = await fetchCampaign(params.supabase, params.professionalId, params.campaignId);
 
   if (["cancelled", "completed", "sent"].includes(campaign.status)) {
@@ -812,11 +843,20 @@ export async function activateDueScheduledCampaigns(params: {
   if (error) throw error;
 
   const started: string[] = [];
+  const featureGateCache = new Map<string, boolean>();
   for (const campaign of data || []) {
     try {
+      const campaignProfessionalId = String(campaign.professional_id);
+      const featureEnabled = await isCampaignFeatureEnabled({
+        supabase: params.supabase,
+        professionalId: campaignProfessionalId,
+        cache: featureGateCache,
+      });
+      if (!featureEnabled) continue;
+
       await startOrResumeCampaign({
         supabase: params.supabase,
-        professionalId: String(campaign.professional_id),
+        professionalId: campaignProfessionalId,
         campaignId: String(campaign.id),
       });
       started.push(String(campaign.id));
@@ -859,6 +899,21 @@ async function releaseStaleProcessingJobs(
 
   if (professionalId) query = query.eq("professional_id", professionalId);
   await query;
+}
+
+async function deferJobForDisabledFeature(params: {
+  supabase: SupabaseClient;
+  job: DispatchJobRow;
+}) {
+  await params.supabase
+    .from("whatsapp_campaign_dispatch_jobs")
+    .update({
+      status: "retrying",
+      locked_at: null,
+      available_at: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
+      last_error: "campaigns_feature_disabled",
+    })
+    .eq("id", params.job.id);
 }
 
 async function evaluateMassFailurePause(params: {
@@ -1265,13 +1320,30 @@ export async function processCampaignDispatchQueue(params: {
   let sentJobs = 0;
   let failedJobs = 0;
   let retryingJobs = 0;
+  let skippedByFeatureGate = 0;
   const touchedCampaigns = new Set<string>();
+  const featureGateCache = new Map<string, boolean>();
 
   for (let batch = 0; batch < maxBatches; batch += 1) {
     const jobs = await claimDispatchJobs(params.supabase, batchSize, params.professionalId);
     if (jobs.length === 0) break;
 
     for (const job of jobs) {
+      const featureEnabled = await isCampaignFeatureEnabled({
+        supabase: params.supabase,
+        professionalId: String(job.professional_id),
+        cache: featureGateCache,
+      });
+      if (!featureEnabled) {
+        await deferJobForDisabledFeature({
+          supabase: params.supabase,
+          job,
+        });
+        processedJobs += 1;
+        skippedByFeatureGate += 1;
+        continue;
+      }
+
       const result = await sendJob({
         supabase: params.supabase,
         job,
@@ -1328,6 +1400,7 @@ export async function processCampaignDispatchQueue(params: {
     sentJobs,
     failedJobs,
     retryingJobs,
+    skippedByFeatureGate,
     remainingJobs: Number(remainingJobs || 0),
   };
 }

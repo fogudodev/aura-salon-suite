@@ -7,6 +7,29 @@ export type SupabaseRuntimeConfig = {
   anonKey: string;
 };
 
+export type ProfessionalFeatureGateState = {
+  featureKey: string;
+  professionalId: string;
+  enabled: boolean;
+  reason: "enabled" | "global_disabled" | "professional_disabled";
+  globalEnabled: boolean;
+  overrideEnabled: boolean | null;
+};
+
+export class FeatureDisabledError extends Error {
+  featureKey: string;
+  reason: string;
+  status: number;
+
+  constructor(featureKey: string, reason: string) {
+    super(`FEATURE_DISABLED:${featureKey}:${reason}`);
+    this.name = "FeatureDisabledError";
+    this.featureKey = featureKey;
+    this.reason = reason;
+    this.status = 403;
+  }
+}
+
 export function getSupabaseRuntimeConfig(): SupabaseRuntimeConfig {
   return {
     supabaseUrl: (Deno.env.get("SUPABASE_URL") || "").trim(),
@@ -58,6 +81,96 @@ export function getInternalFunctionUrl(functionName: string) {
 
 export function getAppBaseUrl() {
   return (Deno.env.get("APP_BASE_URL") || "https://gende.io").replace(/\/$/, "");
+}
+
+export async function getProfessionalFeatureGateState(params: {
+  supabase: SupabaseClient;
+  professionalId: string;
+  featureKey: string;
+  requireGlobalEnabled?: boolean;
+  defaultEnabledWhenFlagMissing?: boolean;
+}): Promise<ProfessionalFeatureGateState> {
+  const requireGlobalEnabled = params.requireGlobalEnabled ?? false;
+  const defaultEnabledWhenFlagMissing = params.defaultEnabledWhenFlagMissing ?? true;
+
+  const { data: globalFlag, error: globalError } = await params.supabase
+    .from("feature_flags")
+    .select("enabled")
+    .eq("key", params.featureKey)
+    .maybeSingle();
+  if (globalError) throw globalError;
+
+  const hasGlobalFlag = typeof globalFlag?.enabled === "boolean";
+  const globalEnabled = requireGlobalEnabled
+    ? Boolean(globalFlag?.enabled)
+    : (hasGlobalFlag ? Boolean(globalFlag?.enabled) : defaultEnabledWhenFlagMissing);
+
+  if (!globalEnabled) {
+    return {
+      featureKey: params.featureKey,
+      professionalId: params.professionalId,
+      enabled: false,
+      reason: "global_disabled",
+      globalEnabled: false,
+      overrideEnabled: null,
+    };
+  }
+
+  const { data: override, error: overrideError } = await params.supabase
+    .from("professional_feature_overrides")
+    .select("enabled")
+    .eq("professional_id", params.professionalId)
+    .eq("feature_key", params.featureKey)
+    .maybeSingle();
+  if (overrideError) throw overrideError;
+
+  const overrideEnabled = typeof override?.enabled === "boolean" ? Boolean(override.enabled) : null;
+  const enabled = overrideEnabled ?? true;
+
+  if (!enabled) {
+    return {
+      featureKey: params.featureKey,
+      professionalId: params.professionalId,
+      enabled: false,
+      reason: "professional_disabled",
+      globalEnabled: true,
+      overrideEnabled,
+    };
+  }
+
+  return {
+    featureKey: params.featureKey,
+    professionalId: params.professionalId,
+    enabled: true,
+    reason: "enabled",
+    globalEnabled: true,
+    overrideEnabled,
+  };
+}
+
+export async function isFeatureEnabledForProfessional(params: {
+  supabase: SupabaseClient;
+  professionalId: string;
+  featureKey: string;
+  requireGlobalEnabled?: boolean;
+  defaultEnabledWhenFlagMissing?: boolean;
+}) {
+  const gate = await getProfessionalFeatureGateState(params);
+  return gate.enabled;
+}
+
+export async function assertFeatureEnabledForProfessional(params: {
+  supabase: SupabaseClient;
+  professionalId: string;
+  featureKey: string;
+  requireGlobalEnabled?: boolean;
+  defaultEnabledWhenFlagMissing?: boolean;
+}) {
+  const gate = await getProfessionalFeatureGateState(params);
+  if (!gate.enabled) {
+    throw new FeatureDisabledError(params.featureKey, gate.reason);
+  }
+  return gate;
 }
 
 export async function resolveProfessionalFromRequest(req: Request): Promise<{

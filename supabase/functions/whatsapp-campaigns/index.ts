@@ -28,6 +28,8 @@ import {
 import { recordLisOpportunityInteraction, notifyProfessionalAboutOpportunity, syncLisRadarOpportunities } from "../_shared/campaigns/lis-radar.ts";
 import { buildToneVariations } from "../_shared/campaigns/templates.ts";
 import {
+  assertFeatureEnabledForProfessional,
+  FeatureDisabledError,
   getAppBaseUrl,
   invokeInternalWorker,
   resolveProfessionalFromRequest,
@@ -74,6 +76,14 @@ serve(async (req) => {
 
   try {
     const { adminClient, userId, professionalId } = await resolveProfessionalFromRequest(req);
+    await assertFeatureEnabledForProfessional({
+      supabase: adminClient,
+      professionalId,
+      featureKey: "campaigns",
+      requireGlobalEnabled: true,
+      defaultEnabledWhenFlagMissing: false,
+    });
+
     const body = await req.json().catch(() => null);
     if (!body || typeof body !== "object") {
       return json({ error: "Invalid request body" }, 400);
@@ -438,6 +448,14 @@ serve(async (req) => {
         return json({ error: `Unknown action: ${action}` }, 400);
     }
   } catch (error) {
+    if (error instanceof FeatureDisabledError) {
+      return json({
+        error: "Feature campaigns is disabled for this professional",
+        code: "feature_disabled",
+        feature: error.featureKey,
+        reason: error.reason,
+      }, error.status);
+    }
     console.error("whatsapp-campaigns error:", error);
     return json({ error: error instanceof Error ? error.message : String(error) }, 500);
   }

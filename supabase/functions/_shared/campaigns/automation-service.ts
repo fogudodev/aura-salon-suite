@@ -7,6 +7,7 @@ import {
   shouldAutoStartAutomation,
   shouldSkipAutomationRun,
 } from "./phase3-domain.ts";
+import { isFeatureEnabledForProfessional } from "./runtime-config.ts";
 import type {
   CampaignAudienceFilters,
   CampaignAudienceType,
@@ -270,6 +271,31 @@ export async function runCampaignAutomation(params: {
   if (error) throw error;
 
   const automationRecord = automation as CampaignAutomationRecord;
+  const featureEnabled = await isFeatureEnabledForProfessional({
+    supabase: params.supabase,
+    professionalId: params.professionalId,
+    featureKey: "campaigns",
+    requireGlobalEnabled: true,
+    defaultEnabledWhenFlagMissing: false,
+  });
+  if (!featureEnabled) {
+    await insertAutomationRunLog({
+      supabase: params.supabase,
+      professionalId: params.professionalId,
+      automationId: automationRecord.id,
+      level: "warn",
+      step: "feature_gate",
+      message: "Automation skipped because campaigns feature is disabled",
+      payload: {
+        featureKey: "campaigns",
+      },
+    });
+    return {
+      status: "skipped",
+      reason: "campaigns_feature_disabled",
+    };
+  }
+
   const skipCheck = shouldSkipAutomationRun({
     isActive: automationRecord.is_active,
     force: params.force,

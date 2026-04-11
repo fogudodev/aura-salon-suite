@@ -2,6 +2,7 @@ import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { processCampaignDispatchQueue } from "../_shared/campaigns/execution.ts";
 import {
   createSupabaseAdminClient,
+  isFeatureEnabledForProfessional,
   invokeInternalWorker,
   isInternalWorkerAuthorized,
 } from "../_shared/campaigns/runtime-config.ts";
@@ -61,9 +62,33 @@ serve(async (req) => {
     const maxBatches = Number(body.maxBatches || 3);
     const chainDepth = Number(body.chainDepth || 0);
     const professionalId = body.professionalId ? String(body.professionalId) : null;
+    const supabase = createSupabaseAdminClient();
+
+    if (professionalId) {
+      const enabled = await isFeatureEnabledForProfessional({
+        supabase,
+        professionalId,
+        featureKey: "campaigns",
+        requireGlobalEnabled: true,
+        defaultEnabledWhenFlagMissing: false,
+      });
+      if (!enabled) {
+        return json({
+          processedJobs: 0,
+          sentJobs: 0,
+          failedJobs: 0,
+          retryingJobs: 0,
+          remainingJobs: 0,
+          activatedCampaigns: [],
+          skipped: true,
+          reason: "campaigns_feature_disabled",
+          professionalId,
+        });
+      }
+    }
 
     const result = await processCampaignDispatchQueue({
-      supabase: createSupabaseAdminClient(),
+      supabase,
       batchSize,
       maxBatches,
       professionalId,
