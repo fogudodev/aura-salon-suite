@@ -1,576 +1,260 @@
-import { useState, useEffect, useMemo, useCallback } from "react";
-import DashboardLayout from "@/components/layout/DashboardLayout";
+import { useMemo, useState } from "react";
+import { useLocation } from "react-router-dom";
 import { motion } from "framer-motion";
-import {
-  Send, Megaphone, Loader2, Users, Clock, AlertTriangle,
-  CheckCircle2, XCircle, Plus, Phone,
-  ShoppingCart, Package, Eye, Receipt,
-} from "lucide-react";
-import { useProfessional } from "@/hooks/useProfessional";
-import { useClients } from "@/hooks/useClients";
-import { useCampaigns, useCampaignLimits, useSendCampaign, useCampaignContacts, useAddonPurchases } from "@/hooks/useCampaigns";
-import { toast } from "sonner";
-import { cn } from "@/lib/utils";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+import { toast } from "sonner";
+import {
+  ArrowUpRight,
+  BarChart3,
+  Clock3,
+  Copy,
+  Loader2,
+  Megaphone,
+  Plus,
+  Sparkles,
+  Target,
+  Wand2,
+} from "lucide-react";
+import DashboardLayout from "@/components/layout/DashboardLayout";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
-import { Label } from "@/components/ui/label";
-import { Checkbox } from "@/components/ui/checkbox";
-import { api } from "@/lib/api-client";
-import { getPackagesByType, type AddonType } from "@/lib/addon-packages";
-import type { Tables } from "@/integrations/supabase/types";
+import { Badge } from "@/components/ui/badge";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Switch } from "@/components/ui/switch";
+import { CampaignStatusBadge } from "@/components/campaigns/CampaignStatusBadge";
+import { CampaignTemplateLibraryDialog } from "@/components/campaigns/CampaignTemplateLibraryDialog";
+import { CampaignWizardDialog } from "@/components/campaigns/CampaignWizardDialog";
+import { LisOpportunityCard } from "@/components/campaigns/LisOpportunityCard";
+import {
+  useCancelWhatsAppCampaign,
+  useCloneWhatsAppCampaign,
+  useGenerateLisOpportunities,
+  useLisOpportunityAction,
+  usePauseWhatsAppCampaign,
+  useRunActiveCampaignAutomations,
+  useRunCampaignAutomation,
+  useSaveCampaignAutomation,
+  useSaveWhatsAppCampaignDraft,
+  useStartWhatsAppCampaign,
+  useToggleCampaignAutomation,
+  useWhatsAppCampaignDetails,
+  useWhatsAppCampaignsDashboard,
+} from "@/hooks/useWhatsAppCampaigns";
+import type { CampaignAutomation, CampaignSummary, CampaignTemplate, CampaignWizardForm, LisOpportunity } from "@/types/whatsapp-campaigns";
 
-type Campaign = Tables<"campaigns">;
-type CampaignContact = Tables<"campaign_contacts">;
-type AddonPurchase = Tables<"addon_purchases">;
+const defaultCampaignForm: CampaignWizardForm = {
+  name: "",
+  type: "manual",
+  objective: "reativacao",
+  audienceType: "inativos",
+  audienceFilterJson: { audienceType: "inativos", inactiveDays: 45, consentOnly: true },
+  audienceEstimateJson: {},
+  messageMode: "hybrid",
+  messageBody: "",
+  ctaType: "booking_link",
+  ctaPayloadJson: { bookingLink: "https://gende.io" },
+  sendConfigJson: {},
+};
 
-const MAX_NAME_LENGTH = 100;
-const MAX_MESSAGE_LENGTH = 1000;
-const CLIENTS_PAGE_SIZE = 50;
+const automationPresets = [
+  { name: "Reativacao 45 dias", triggerType: "inactive_clients", objective: "reativacao", audienceType: "inativos", audienceFilterJson: { audienceType: "inativos", inactiveDays: 45, consentOnly: true }, messageBody: "Oi, {nome}. Faz tempo desde sua ultima visita. Se quiser voltar, seu link esta aqui: {link_agendamento}", cooldownDays: 7, autoStart: false, isActive: true },
+  { name: "Agenda ociosa amanha", triggerType: "idle_slots", objective: "preenchimento_agenda", audienceType: "oportunidade_agenda", audienceFilterJson: { audienceType: "oportunidade_agenda", turn: "tarde", consentOnly: true }, messageBody: "Oi, {nome}. Abrimos horario para amanha e queria te priorizar: {link_agendamento}", cooldownDays: 2, autoStart: false, isActive: true },
+  { name: "Manutencao inteligente", triggerType: "maintenance_window", objective: "manutencao", audienceType: "janela_manutencao", audienceFilterJson: { audienceType: "janela_manutencao", maintenanceWindowDays: 7, consentOnly: true }, messageBody: "Oi, {nome}. Voce entrou na janela ideal de manutencao de {servico}: {link_agendamento}", cooldownDays: 5, autoStart: false, isActive: true },
+];
 
-// Static maps outside component to avoid re-creation
-const STATUS_LABELS: Record<string, string> = {
-  draft: "Rascunho",
-  sending: "Enviando",
-  completed: "Concluída",
-  failed: "Falhou",
-};
-const STATUS_COLORS: Record<string, string> = {
-  draft: "bg-muted text-muted-foreground",
-  sending: "bg-yellow-500/10 text-yellow-700 dark:text-yellow-400",
-  completed: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
-  failed: "bg-destructive/10 text-destructive",
-};
-const CONTACT_STATUS_COLORS: Record<string, string> = {
-  sent: "text-emerald-700 dark:text-emerald-400",
-  failed: "text-destructive",
-  pending: "text-muted-foreground",
-};
-const CONTACT_STATUS_ICONS: Record<string, typeof CheckCircle2> = {
-  sent: CheckCircle2,
-  failed: XCircle,
-  pending: Clock,
-};
-const CONTACT_STATUS_LABELS: Record<string, string> = {
-  sent: "Enviada",
-  failed: "Falhou",
-  pending: "Pendente",
+const money = (value: number) => `R$ ${Number(value || 0).toFixed(0)}`;
+const dt = (value?: string | null, pattern = "dd/MM HH:mm") => (value ? format(new Date(value), pattern, { locale: ptBR }) : "nunca");
+
+const mapCampaignToForm = (campaign: CampaignSummary): CampaignWizardForm => ({
+  id: campaign.id,
+  sourceOpportunityId: campaign.source_opportunity?.id || null,
+  name: campaign.name,
+  type: campaign.type as CampaignWizardForm["type"],
+  objective: campaign.objective as CampaignWizardForm["objective"],
+  audienceType: campaign.audience_type as CampaignWizardForm["audienceType"],
+  audienceFilterJson: campaign.audience_filter_json || {},
+  audienceEstimateJson: campaign.audience_estimate_json || {},
+  messageMode: campaign.message_mode as CampaignWizardForm["messageMode"],
+  templateId: campaign.template?.id || campaign.template_id,
+  templateName: campaign.template?.name || campaign.template_name,
+  messageBody: campaign.message_body,
+  ctaType: campaign.cta_type as CampaignWizardForm["ctaType"],
+  ctaPayloadJson: campaign.cta_payload_json || {},
+  sendConfigJson: campaign.send_config_json || {},
+  scheduledAt: campaign.scheduled_at,
+});
+
+const lastAutomationResult = (automation: CampaignAutomation) => {
+  const status = String(automation.last_result_json?.status || "");
+  const reason = String(automation.last_result_json?.reason || automation.last_result_json?.error || "");
+  if (!status) return { label: "Sem execucao", detail: "Ainda nao houve execucao registrada.", tone: "text-[#8a7b6d]" };
+  if (status === "completed") return { label: "Execucao concluida", detail: "Campanha gerada com publico elegivel.", tone: "text-emerald-700" };
+  if (status === "skipped") return { label: "Execucao pulada", detail: reason || "Sem publico elegivel.", tone: "text-amber-700" };
+  if (status === "failed") return { label: "Execucao com erro", detail: reason || "Falha operacional.", tone: "text-rose-700" };
+  return { label: status, detail: reason || "Resultado operacional registrado.", tone: "text-[#8a7b6d]" };
 };
 
 const Campaigns = () => {
-  const { data: professional } = useProfessional();
-  const { data: campaigns, isLoading } = useCampaigns();
-  const { data: limitsData, refetch: refetchLimits } = useCampaignLimits();
-  const { data: clients } = useClients();
-  const sendCampaign = useSendCampaign();
-  const { data: purchases } = useAddonPurchases();
-  const [showNew, setShowNew] = useState(false);
-  const [detailCampaignId, setDetailCampaignId] = useState<string | null>(null);
-  const { data: contacts, isLoading: loadingContacts } = useCampaignContacts(detailCampaignId);
-  const [name, setName] = useState("");
-  const [message, setMessage] = useState("");
-  const [selectedClients, setSelectedClients] = useState<string[]>([]);
-  const [sending, setSending] = useState(false);
-  const [showAddons, setShowAddons] = useState(false);
-  const [buyingAddon, setBuyingAddon] = useState<string | null>(null);
-  const [verifying, setVerifying] = useState(false);
-  const [confirmSend, setConfirmSend] = useState(false);
-  const [clientSearch, setClientSearch] = useState("");
-  const [clientsVisible, setClientsVisible] = useState(CLIENTS_PAGE_SIZE);
+  const location = useLocation();
+  const params = useMemo(() => new URLSearchParams(location.search), [location.search]);
+  const highlightedOpportunityId = params.get("opportunity");
 
-  // Clients with phone, filtered and paginated
-  const clientsWithPhone = useMemo(
-    () => (clients || []).filter(c => c.phone),
-    [clients]
-  );
-  const filteredClients = useMemo(() => {
-    if (!clientSearch.trim()) return clientsWithPhone;
-    const q = clientSearch.toLowerCase();
-    return clientsWithPhone.filter(c => c.name.toLowerCase().includes(q) || c.phone?.toLowerCase().includes(q));
-  }, [clientsWithPhone, clientSearch]);
-  const visibleClients = useMemo(
-    () => filteredClients.slice(0, clientsVisible),
-    [filteredClients, clientsVisible]
-  );
+  const dashboard = useWhatsAppCampaignsDashboard();
+  const saveDraft = useSaveWhatsAppCampaignDraft();
+  const cloneCampaign = useCloneWhatsAppCampaign();
+  const startCampaign = useStartWhatsAppCampaign();
+  const pauseCampaign = usePauseWhatsAppCampaign();
+  const cancelCampaign = useCancelWhatsAppCampaign();
+  const generateLis = useGenerateLisOpportunities();
+  const opportunityAction = useLisOpportunityAction();
+  const saveAutomation = useSaveCampaignAutomation();
+  const toggleAutomation = useToggleCampaignAutomation();
+  const runAutomation = useRunCampaignAutomation();
+  const runAutomations = useRunActiveCampaignAutomations();
 
-  // Auto-verify addon payment on return from Stripe
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const sessionId = params.get("addon_session_id");
-    if (!sessionId || !professional) return;
+  const [wizardOpen, setWizardOpen] = useState(false);
+  const [templateLibraryOpen, setTemplateLibraryOpen] = useState(false);
+  const [selectedOpportunity, setSelectedOpportunity] = useState<LisOpportunity | null>(null);
+  const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(null);
+  const [editingCampaign, setEditingCampaign] = useState<CampaignWizardForm | null>(null);
+  const [togglingAutomationId, setTogglingAutomationId] = useState<string | null>(null);
+  const [runningAutomationId, setRunningAutomationId] = useState<string | null>(null);
+  const campaignDetails = useWhatsAppCampaignDetails(selectedCampaignId);
 
-    const verify = async () => {
-      setVerifying(true);
-      window.history.replaceState({}, "", window.location.pathname);
-      try {
-        const { data, error } = await api.functions.invoke("purchase-addon", {
-          body: { action: "verify-payment", sessionId, professionalId: professional.id },
-        });
-        if (error) throw error;
-        if (data?.success) {
-          const typeLabels: Record<string, string> = { reminders: "lembretes", campaigns: "campanhas", contacts: "contatos" };
-          toast.success(`✅ ${data.quantity} ${typeLabels[data.type] || "extras"} adicionados à sua conta!`);
-          refetchLimits();
-        } else {
-          toast.error(data?.error || "Pagamento não confirmado ainda. Tente novamente em instantes.");
-        }
-      } catch (err: any) {
-        toast.error("Erro ao verificar pagamento: " + (err.message || ""));
-      } finally {
-        setVerifying(false);
-      }
-    };
-    verify();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [professional?.id]);
+  const templates = dashboard.data?.templates || [];
+  const metrics = dashboard.data?.metrics;
+  const limits = dashboard.data?.limits;
+  const opportunities = dashboard.data?.opportunities || [];
+  const automations = dashboard.data?.automations || [];
+  const automationRuns = dashboard.data?.automationRuns || [];
+  const campaigns = dashboard.data?.campaigns || [];
+  const comparatives = dashboard.data?.comparatives;
 
-  const handleBuyAddon = async (priceId: string) => {
-    if (!professional) return;
-    setBuyingAddon(priceId);
-    try {
-      const { data, error } = await api.functions.invoke("purchase-addon", {
-        body: { action: "create-checkout", priceId, professionalId: professional.id },
-      });
-      if (error) throw error;
-      if (data?.url) {
-        window.location.href = data.url;
-      }
-    } catch (err: any) {
-      toast.error(err.message || "Erro ao iniciar compra");
-    } finally {
-      setBuyingAddon(null);
-    }
-  };
+  if (dashboard.isLoading) {
+    return <DashboardLayout title="Campanhas Inteligentes" subtitle="Carregando modulo de campanhas..."><div className="flex min-h-[50vh] items-center justify-center text-[#6b5a4a]"><Loader2 size={18} className="mr-2 animate-spin" />Carregando radar e campanhas...</div></DashboardLayout>;
+  }
 
-  const handleSendConfirmed = async () => {
-    if (!professional || !name.trim() || !message.trim()) return;
-    setSending(true);
-    setConfirmSend(false);
-    try {
-      const result = await sendCampaign.mutateAsync({
-        professionalId: professional.id,
-        name: name.trim().slice(0, MAX_NAME_LENGTH),
-        message: message.trim().slice(0, MAX_MESSAGE_LENGTH),
-        clientIds: selectedClients.length > 0 ? selectedClients : undefined,
-      });
-      toast.success(`Campanha enviada! ${result.sent} de ${result.total} mensagens`);
-      setShowNew(false);
-      setName("");
-      setMessage("");
-      setSelectedClients([]);
-    } catch (err: any) {
-      toast.error(err.message || "Erro ao enviar campanha");
-    } finally {
-      setSending(false);
-    }
-  };
-
-  const handleSendClick = () => {
-    if (!name.trim() || !message.trim()) {
-      toast.error("Preencha nome e mensagem da campanha");
-      return;
-    }
-    setConfirmSend(true);
-  };
-
-  const toggleClient = useCallback((clientId: string, checked: boolean) => {
-    setSelectedClients(prev =>
-      checked ? [...prev, clientId] : prev.filter(id => id !== clientId)
+  if (dashboard.error) {
+    return (
+      <DashboardLayout title="Campanhas Inteligentes" subtitle="Nao foi possivel carregar o modulo.">
+        <div className="rounded-[28px] border border-[#eadfce] bg-white p-8 text-center">
+          <p className="text-lg font-semibold text-[#3d2c1e]">Erro ao carregar campanhas.</p>
+          <p className="mt-2 text-sm text-[#6b5a4a]">Verifique a conexao e tente novamente.</p>
+          <Button variant="outline" className="mt-5 rounded-2xl border-[#eadfce]" onClick={() => dashboard.refetch()}>Recarregar</Button>
+        </div>
+      </DashboardLayout>
     );
-  }, []);
-
-  const limits = limitsData?.limits;
-  const usage = limitsData?.usage;
-  const extras = limitsData?.extras || { extra_reminders: 0, extra_campaigns: 0, extra_contacts: 0 };
-
-  const effectiveCampaigns = limits ? (limits.daily_campaigns === -1 ? -1 : limits.daily_campaigns + extras.extra_campaigns) : 0;
-  const effectiveReminders = limits ? (limits.daily_reminders === -1 ? -1 : limits.daily_reminders + extras.extra_reminders) : 0;
-  const effectiveContacts = limits ? (limits.campaign_max_contacts === -1 ? -1 : limits.campaign_max_contacts + extras.extra_contacts) : 0;
-
-  const targetCount = selectedClients.length > 0 ? selectedClients.length : clientsWithPhone.length;
+  }
 
   return (
-    <DashboardLayout title="Campanhas" subtitle="Envie mensagens para seus clientes">
-      {/* Limits info */}
-      {limits ? (
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
-          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="glass-card rounded-2xl p-4">
-            <div className="flex items-center justify-between mb-1">
-              <span className="text-xs text-muted-foreground">Campanhas hoje</span>
-              <Megaphone size={14} className="text-accent" />
+    <DashboardLayout title="Campanhas Inteligentes" subtitle="Radar da Lis para gerar receita, recuperar clientes e preencher agenda.">
+      <div className="space-y-6">
+        <motion.section initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} className="rounded-[32px] border border-[#eadfce] bg-[linear-gradient(135deg,#fffdf9,#fdf6ee)] p-6 shadow-[0_30px_90px_-60px_rgba(61,44,30,0.24)] sm:p-8">
+          <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+            <div className="max-w-3xl">
+              <div className="mb-4 inline-flex items-center gap-2 rounded-full bg-[#f5dcc3] px-4 py-2 text-sm font-semibold text-[#d4a84b]"><Sparkles size={15} />Lis Radar de Faturamento</div>
+              <h2 className="text-3xl font-black leading-[1.02] tracking-[-0.05em] text-[#3d2c1e] sm:text-4xl">Use seu WhatsApp como canal de crescimento com dados reais.</h2>
+              <p className="mt-4 max-w-2xl text-base leading-7 text-[#6b5a4a]">Aqui voce ve o que e estimado (draft/sugestao) e o que ja virou resultado real (envio, agendamento e receita).</p>
             </div>
-            <p className="text-xl font-bold text-foreground">
-              {usage?.campaigns_sent || 0}
-              <span className="text-sm font-normal text-muted-foreground">
-                /{effectiveCampaigns === -1 ? "∞" : effectiveCampaigns}
-              </span>
-            </p>
-            {extras.extra_campaigns > 0 && <p className="text-[10px] text-accent mt-1">+{extras.extra_campaigns} extras</p>}
-          </motion.div>
-          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }} className="glass-card rounded-2xl p-4">
-            <div className="flex items-center justify-between mb-1">
-              <span className="text-xs text-muted-foreground">Lembretes hoje</span>
-              <Clock size={14} className="text-accent" />
+            <div className="flex flex-wrap gap-3">
+              <Button onClick={() => { setEditingCampaign(defaultCampaignForm); setWizardOpen(true); }} className="rounded-2xl bg-[#eebf9c] text-[#3d2c1e] hover:bg-[#d4a84b]"><Plus size={16} className="mr-2" />Nova campanha</Button>
+              <Button variant="outline" onClick={() => setTemplateLibraryOpen(true)} className="rounded-2xl border-[#eadfce] bg-white"><Wand2 size={16} className="mr-2" />Biblioteca de mensagens</Button>
+              <Button variant="outline" onClick={async () => { try { await generateLis.mutateAsync(); toast.success("Radar da Lis atualizado."); } catch (e) { toast.error("Falha ao atualizar radar."); console.error(e); } }} disabled={generateLis.isPending} className="rounded-2xl border-[#eadfce] bg-white">{generateLis.isPending ? <Loader2 size={16} className="mr-2 animate-spin" /> : <Sparkles size={16} className="mr-2" />}Atualizar radar da Lis</Button>
             </div>
-            <p className="text-xl font-bold text-foreground">
-              {usage?.reminders_sent || 0}
-              <span className="text-sm font-normal text-muted-foreground">
-                /{effectiveReminders === -1 ? "∞" : effectiveReminders}
-              </span>
-            </p>
-            {extras.extra_reminders > 0 && <p className="text-[10px] text-accent mt-1">+{extras.extra_reminders} extras</p>}
-          </motion.div>
-          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="glass-card rounded-2xl p-4">
-            <div className="flex items-center justify-between mb-1">
-              <span className="text-xs text-muted-foreground">Máx. contatos/campanha</span>
-              <Users size={14} className="text-accent" />
-            </div>
-            <p className="text-xl font-bold text-foreground">
-              {effectiveContacts === -1 ? "∞" : effectiveContacts}
-            </p>
-            {extras.extra_contacts > 0 && <p className="text-[10px] text-accent mt-1">+{extras.extra_contacts} extras</p>}
-          </motion.div>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
-          {[1, 2, 3].map(i => (
-            <div key={i} className="glass-card rounded-2xl p-4 animate-pulse">
-              <div className="h-4 bg-muted rounded w-24 mb-2" />
-              <div className="h-6 bg-muted rounded w-16" />
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Addon Store Button */}
-      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-        <Button
-          variant="outline"
-          onClick={() => setShowAddons(true)}
-          className="w-full rounded-2xl py-6 border-dashed border-accent/30 hover:bg-accent/5 mb-4"
-        >
-          <ShoppingCart size={16} className="text-accent mr-2" /> Comprar Extras (Lembretes, Campanhas, Contatos)
-        </Button>
-      </motion.div>
-
-      {/* New Campaign Button */}
-      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-        <Button
-          onClick={() => setShowNew(true)}
-          className="w-full rounded-2xl py-6 mb-6 gap-2"
-        >
-          <Plus size={18} /> Nova Campanha
-        </Button>
-      </motion.div>
-
-      {/* Campaigns List */}
-      {isLoading ? (
-        <div className="flex justify-center py-12"><Loader2 className="animate-spin text-muted-foreground" size={28} /></div>
-      ) : !campaigns?.length ? (
-        <div className="glass-card rounded-2xl p-12 text-center">
-          <Megaphone size={40} className="mx-auto text-muted-foreground mb-3" />
-          <p className="text-muted-foreground">Nenhuma campanha enviada ainda</p>
-        </div>
-      ) : (
-        <div className="space-y-3">
-          {(campaigns as Campaign[]).map((c, i) => (
-            <motion.div
-              key={c.id}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: i * 0.03 }}
-              className="glass-card rounded-2xl p-5 cursor-pointer hover:ring-2 hover:ring-accent/30 transition-all"
-              onClick={() => setDetailCampaignId(c.id)}
-            >
-              <div className="flex items-center justify-between mb-2">
-                <h3 className="font-semibold text-foreground">{c.name}</h3>
-                <div className="flex items-center gap-2">
-                  <span className={cn("px-2 py-0.5 rounded-full text-xs font-semibold", STATUS_COLORS[c.status] || "bg-muted")}>
-                    {STATUS_LABELS[c.status] || c.status}
-                  </span>
-                  <Eye size={14} className="text-muted-foreground" />
-                </div>
-              </div>
-              <p className="text-sm text-muted-foreground line-clamp-2 mb-3">{c.message}</p>
-              <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                <span className="flex items-center gap-1"><Users size={12} /> {c.total_contacts} contatos</span>
-                <span className="flex items-center gap-1"><CheckCircle2 size={12} className="text-emerald-600 dark:text-emerald-400" /> {c.sent_count} enviadas</span>
-                {c.failed_count > 0 && (
-                  <span className="flex items-center gap-1"><XCircle size={12} className="text-destructive" /> {c.failed_count} falhas</span>
-                )}
-                {c.created_at && (
-                  <span>{format(new Date(c.created_at), "dd/MM HH:mm", { locale: ptBR })}</span>
-                )}
-              </div>
-            </motion.div>
-          ))}
-        </div>
-      )}
-
-      {/* New Campaign Dialog */}
-      <Dialog open={showNew} onOpenChange={setShowNew}>
-        <DialogContent className="max-w-lg bg-background border-border">
-          <DialogHeader>
-            <DialogTitle className="text-foreground">Nova Campanha</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 mt-2">
-            <div className="space-y-2">
-              <Label>
-                Nome da campanha * <span className="text-xs text-muted-foreground">({name.length}/{MAX_NAME_LENGTH})</span>
-              </Label>
-              <Input
-                value={name}
-                onChange={(e) => setName(e.target.value.slice(0, MAX_NAME_LENGTH))}
-                placeholder="Ex: Promoção de Natal"
-                maxLength={MAX_NAME_LENGTH}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>
-                Mensagem * <span className="text-xs text-muted-foreground">({message.length}/{MAX_MESSAGE_LENGTH})</span>
-              </Label>
-              <Textarea
-                value={message}
-                onChange={(e) => setMessage(e.target.value.slice(0, MAX_MESSAGE_LENGTH))}
-                placeholder="Olá {nome}! Temos uma promoção especial..."
-                rows={4}
-                maxLength={MAX_MESSAGE_LENGTH}
-                className="resize-none"
-              />
-              <p className="text-xs text-muted-foreground">Variáveis: {"{nome}"}, {"{link}"}, {"{negocio}"}</p>
-            </div>
-
-            {limits && (
-              <div className="flex items-start gap-2 bg-accent/5 rounded-xl p-3">
-                <AlertTriangle size={14} className="text-accent mt-0.5 shrink-0" />
-                <div className="text-xs text-muted-foreground">
-                  <p>Plano <strong className="text-foreground">{limitsData?.planId?.toUpperCase()}</strong>: máx {limits.campaign_max_contacts === -1 ? "ilimitados" : limits.campaign_max_contacts} contatos por campanha, intervalo mínimo de {limits.campaign_min_interval_hours}h entre campanhas.</p>
-                </div>
-              </div>
-            )}
-
-            {/* Client selection */}
-            <div className="space-y-2">
-              <Label>
-                Destinatários <span className="text-xs text-muted-foreground">(vazio = todos os clientes)</span>
-              </Label>
-              {clientsWithPhone.length > 10 && (
-                <Input
-                  value={clientSearch}
-                  onChange={(e) => { setClientSearch(e.target.value); setClientsVisible(CLIENTS_PAGE_SIZE); }}
-                  placeholder="Buscar cliente..."
-                  className="mb-1"
-                />
-              )}
-              <div className="max-h-40 overflow-y-auto space-y-1 bg-muted/30 rounded-xl p-2">
-                {visibleClients.map(c => (
-                  <label key={c.id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-muted/50 cursor-pointer text-sm">
-                    <Checkbox
-                      checked={selectedClients.includes(c.id)}
-                      onCheckedChange={(checked) => toggleClient(c.id, !!checked)}
-                    />
-                    <span className="text-foreground">{c.name}</span>
-                    <span className="text-muted-foreground text-xs">{c.phone}</span>
-                  </label>
-                ))}
-                {filteredClients.length > clientsVisible && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="w-full text-xs"
-                    onClick={() => setClientsVisible(prev => prev + CLIENTS_PAGE_SIZE)}
-                  >
-                    Mostrar mais ({filteredClients.length - clientsVisible} restantes)
-                  </Button>
-                )}
-                {clientsWithPhone.length === 0 && (
-                  <p className="text-xs text-muted-foreground p-2">Nenhum cliente com telefone</p>
-                )}
-                {clientsWithPhone.length > 0 && filteredClients.length === 0 && (
-                  <p className="text-xs text-muted-foreground p-2">Nenhum cliente encontrado</p>
-                )}
-              </div>
-              {selectedClients.length > 0 && (
-                <p className="text-xs text-accent">{selectedClients.length} selecionados</p>
-              )}
-            </div>
-
-            <Button
-              onClick={handleSendClick}
-              disabled={sending || !name.trim() || !message.trim()}
-              className="w-full gap-2"
-            >
-              {sending ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
-              {sending ? "Enviando..." : "Enviar Campanha"}
-            </Button>
           </div>
+          <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+            {[
+              { label: "Rascunhos", value: metrics?.drafts || 0, detail: "estimado", icon: Megaphone, real: false },
+              { label: "Pipeline", value: money(metrics?.estimatedPipelineRevenue || 0), detail: "estimado", icon: Target, real: false },
+              { label: "Enviadas", value: metrics?.sentCount || 0, detail: "real", icon: ArrowUpRight, real: true },
+              { label: "Agendamentos", value: metrics?.bookingCount || 0, detail: "real", icon: Clock3, real: true },
+              { label: "Receita", value: money(metrics?.revenueGenerated || 0), detail: "real", icon: BarChart3, real: true },
+            ].map((item) => (
+              <div key={item.label} className="rounded-[24px] border border-[#eadfce] bg-white/90 p-5">
+                <div className="flex items-center justify-between"><p className="text-sm font-medium text-[#8a7b6d]">{item.label}</p><item.icon size={16} className="text-[#d4a84b]" /></div>
+                <p className="mt-3 text-3xl font-black tracking-[-0.05em] text-[#3d2c1e]">{item.value}</p>
+                <div className="mt-2 flex items-center justify-between"><p className="text-xs text-[#8a7b6d]">{item.real ? "Resultado operacional" : "Projecao comercial"}</p><Badge variant="outline" className={item.real ? "border-emerald-200 text-emerald-700" : "border-amber-200 text-amber-700"}>{item.detail}</Badge></div>
+              </div>
+            ))}
+          </div>
+        </motion.section>
+
+        <div className="grid gap-6 xl:grid-cols-[1.35fr_0.65fr]">
+          <section className="space-y-4">
+            <div><h3 className="text-xl font-bold text-[#3d2c1e]">Radar da Lis</h3><p className="text-sm text-[#6b5a4a]">Oportunidades com publico, conversao e impacto financeiro estimado.</p></div>
+            {!opportunities.length ? <div className="rounded-[28px] border border-dashed border-[#eadfce] bg-white p-8 text-center"><Sparkles size={28} className="mx-auto mb-3 text-[#d4a84b]" /><p className="text-lg font-semibold text-[#3d2c1e]">Nenhuma oportunidade ativa.</p><p className="mt-2 text-sm text-[#6b5a4a]">Atualize o radar para detectar novas oportunidades.</p></div> : opportunities.map((opportunity) => (
+              <LisOpportunityCard
+                key={opportunity.id}
+                opportunity={opportunity}
+                highlighted={highlightedOpportunityId === opportunity.id}
+                busy={opportunityAction.isPending}
+                onView={async () => { try { setSelectedOpportunity(opportunity); await opportunityAction.mutateAsync({ opportunityId: opportunity.id, kind: "opened_details" }); } catch (e) { toast.error("Nao foi possivel abrir os detalhes."); console.error(e); } }}
+                onDismiss={async () => { try { await opportunityAction.mutateAsync({ opportunityId: opportunity.id, kind: "dismissed" }); toast.success("Oportunidade ignorada."); } catch (e) { toast.error("Falha ao ignorar oportunidade."); console.error(e); } }}
+                onRemindLater={async () => { try { await opportunityAction.mutateAsync({ opportunityId: opportunity.id, kind: "remind_later" }); toast.success("A Lis vai lembrar depois."); } catch (e) { toast.error("Falha ao adiar lembrete."); console.error(e); } }}
+                onGenerateDraft={async () => { try { const result = await opportunityAction.mutateAsync({ opportunityId: opportunity.id, kind: "generate_campaign" }); const created = result?.campaign as CampaignSummary | undefined; toast.success("Campanha criada pela Lis."); if (created) { setEditingCampaign(mapCampaignToForm(created)); setWizardOpen(true); } } catch (e) { toast.error("Falha ao gerar campanha."); console.error(e); } }}
+              />
+            ))}
+          </section>
+          <section className="space-y-4">
+            <div className="rounded-[28px] border border-[#eadfce] bg-white p-6"><h3 className="text-lg font-bold text-[#3d2c1e]">Limites de envio</h3><p className="text-sm text-[#6b5a4a]">Controle de volume para manter boa reputacao no WhatsApp.</p><div className="mt-4 space-y-3 text-sm text-[#6b5a4a]"><p>Plano: <span className="font-semibold text-[#3d2c1e]">{limits?.planId || "sem plano"}</span></p><p>Campanhas hoje: <span className="font-semibold text-[#3d2c1e]">{limits?.usage.campaigns_sent || 0}</span></p><p>Contatos por campanha: <span className="font-semibold text-[#3d2c1e]">{limits?.limits.campaign_max_contacts === -1 ? "∞" : (limits?.limits.campaign_max_contacts || 0) + (limits?.extras.extra_contacts || 0)}</span></p></div></div>
+            <div className="rounded-[28px] border border-[#eadfce] bg-white p-6"><div className="flex items-center justify-between"><h3 className="text-lg font-bold text-[#3d2c1e]">Modelos</h3><Button variant="ghost" onClick={() => setTemplateLibraryOpen(true)}>Ver todos</Button></div>{templates.length === 0 ? <p className="mt-3 text-sm text-[#8a7b6d]">Nenhum template ativo.</p> : <div className="mt-3 space-y-2">{templates.slice(0, 3).map((template) => <button key={template.id} type="button" onClick={() => { setEditingCampaign({ ...defaultCampaignForm, templateId: template.id, templateName: template.name, objective: template.objective as CampaignWizardForm["objective"], messageBody: template.body, messageMode: "hybrid" }); setWizardOpen(true); }} className="w-full rounded-2xl border border-[#eadfce] bg-[#fffdfa] p-3 text-left"><p className="font-semibold text-[#3d2c1e]">{template.name}</p><p className="text-xs text-[#8a7b6d] line-clamp-2">{template.body}</p></button>)}</div>}</div>
+          </section>
+        </div>
+
+        <section className="rounded-[30px] border border-[#eadfce] bg-white p-6 sm:p-8">
+          <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+            <div><h3 className="text-2xl font-bold text-[#3d2c1e]">Automacoes</h3><p className="text-sm text-[#6b5a4a]">Status, ultima execucao e erro visivel na mesma tela.</p></div>
+            <div className="flex flex-wrap gap-3">
+              <Button variant="outline" className="rounded-2xl border-[#eadfce]" onClick={async () => { try { await runAutomations.mutateAsync({ limit: 20 }); toast.success("Varredura executada."); } catch (e) { toast.error("Falha ao rodar automacoes."); console.error(e); } }} disabled={runAutomations.isPending}>{runAutomations.isPending ? <Loader2 size={14} className="mr-2 animate-spin" /> : <Sparkles size={14} className="mr-2" />}Rodar automacoes</Button>
+              {!automations.length && <Button className="rounded-2xl bg-[#eebf9c] text-[#3d2c1e] hover:bg-[#d4a84b]" onClick={async () => { try { for (const preset of automationPresets) await saveAutomation.mutateAsync(preset); toast.success("Automacoes base criadas."); } catch (e) { toast.error("Falha ao criar automacoes base."); console.error(e); } }} disabled={saveAutomation.isPending}>{saveAutomation.isPending ? <Loader2 size={14} className="mr-2 animate-spin" /> : <Plus size={14} className="mr-2" />}Criar base</Button>}
+            </div>
+          </div>
+          {!automations.length ? <div className="rounded-[24px] border border-dashed border-[#eadfce] bg-[#fffdfa] p-8 text-center"><Clock3 size={28} className="mx-auto mb-3 text-[#d4a84b]" /><p className="text-lg font-semibold text-[#3d2c1e]">Nenhuma automacao configurada.</p></div> : <div className="grid gap-4 lg:grid-cols-2">{automations.map((automation) => { const result = lastAutomationResult(automation); const toggling = togglingAutomationId === automation.id; const running = runningAutomationId === automation.id; return <div key={automation.id} className="rounded-[24px] border border-[#eadfce] bg-[#fffdfa] p-5"><div className="flex items-start justify-between"><div><p className="text-lg font-bold text-[#3d2c1e]">{automation.name}</p><p className="text-xs uppercase tracking-[0.12em] text-[#a67a44]">{automation.trigger_type} • {automation.objective}</p></div><div className="flex items-center gap-2"><Badge variant="outline" className={automation.is_active ? "border-emerald-200 text-emerald-700" : "border-slate-200 text-slate-600"}>{automation.is_active ? "Ativa" : "Inativa"}</Badge><Switch checked={automation.is_active} onCheckedChange={async (checked) => { setTogglingAutomationId(automation.id); try { await toggleAutomation.mutateAsync({ automationId: automation.id, isActive: checked }); } finally { setTogglingAutomationId(null); } }} disabled={toggling} /></div></div><p className="mt-2 text-sm text-[#6b5a4a] line-clamp-2">{automation.message_body || "Sem mensagem personalizada."}</p><div className="mt-3 rounded-xl border border-[#eadfce] bg-white px-3 py-2"><p className={`text-xs font-semibold ${result.tone}`}>{result.label}</p><p className="mt-1 text-xs text-[#6b5a4a]">{result.detail}</p><p className="mt-1 text-xs text-[#8a7b6d]">Ultima execucao: {dt(automation.last_run_at)}</p></div><div className="mt-4 flex flex-wrap gap-2"><Button variant="outline" className="rounded-2xl border-[#eadfce]" onClick={async () => { setRunningAutomationId(automation.id); try { await runAutomation.mutateAsync({ automationId: automation.id }); toast.success("Automacao executada."); } catch (e) { toast.error("Falha ao executar automacao."); console.error(e); } finally { setRunningAutomationId(null); } }} disabled={running}>{running ? <Loader2 size={14} className="mr-2 animate-spin" /> : <ArrowUpRight size={14} className="mr-2" />}Executar agora</Button>{automation.auto_start ? <Badge variant="outline">Auto-start</Badge> : <Badge variant="outline">Com aprovacao</Badge>}</div></div>; })}</div>}
+          {automationRuns.length > 0 && <div className="mt-4 rounded-[24px] border border-[#eadfce] bg-[#fffdfa] p-5"><p className="text-sm font-semibold text-[#3d2c1e]">Ultimas execucoes</p><div className="mt-3 space-y-2">{automationRuns.slice(0, 8).map((run) => <div key={run.id} className="rounded-xl bg-[#fdf8f3] px-3 py-2 text-xs"><div className="flex items-center justify-between"><span className="text-[#6b5a4a]">{run.automation?.name || "Automacao"}</span><span className={run.status === "failed" ? "text-rose-600" : run.status === "skipped" ? "text-amber-600" : "text-[#8a7b6d]"}>{run.status}</span><span className="text-[#8a7b6d]">{dt(run.started_at)}</span></div>{run.error_message && <p className="mt-1 text-rose-600">{run.error_message}</p>}</div>)}</div></div>}
+        </section>
+
+        <section className="rounded-[30px] border border-[#eadfce] bg-white p-6 sm:p-8">
+          <h3 className="text-2xl font-bold text-[#3d2c1e]">Comparativos e funil</h3>
+          <p className="text-sm text-[#6b5a4a]">Leitura real de objetivo, segmento, horario e funil Lis → campanha → resultado.</p>
+          <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4"><div className="rounded-2xl bg-[#fdf8f3] p-4"><p className="text-xs text-[#8a7b6d]">Oportunidades</p><p className="mt-1 text-2xl font-bold text-[#3d2c1e]">{comparatives?.lisFunnel?.opportunities_detected || 0}</p></div><div className="rounded-2xl bg-[#fdf8f3] p-4"><p className="text-xs text-[#8a7b6d]">Campanhas Lis</p><p className="mt-1 text-2xl font-bold text-[#3d2c1e]">{comparatives?.lisFunnel?.campaigns_generated || 0}</p></div><div className="rounded-2xl bg-[#fdf8f3] p-4"><p className="text-xs text-[#8a7b6d]">Agendamentos</p><p className="mt-1 text-2xl font-bold text-[#3d2c1e]">{comparatives?.lisFunnel?.bookings_generated || 0}</p></div><div className="rounded-2xl bg-[#fdf8f3] p-4"><p className="text-xs text-[#8a7b6d]">Receita</p><p className="mt-1 text-2xl font-bold text-[#3d2c1e]">{money(comparatives?.lisFunnel?.revenue_generated || 0)}</p></div></div>
+        </section>
+
+        <section className="rounded-[30px] border border-[#eadfce] bg-white p-6 sm:p-8">
+          <div className="mb-5 flex items-end justify-between"><div><h3 className="text-2xl font-bold text-[#3d2c1e]">Campanhas e rascunhos</h3><p className="text-sm text-[#6b5a4a]">Dados estimados para draft/scheduled e dados reais para campanhas executadas.</p></div><Button onClick={() => { setEditingCampaign(defaultCampaignForm); setWizardOpen(true); }} className="rounded-2xl bg-[#3d2c1e] hover:bg-[#2b1f15]"><Plus size={16} className="mr-2" />Criar campanha</Button></div>
+          {!campaigns.length ? <div className="rounded-[24px] border border-dashed border-[#eadfce] bg-[#fffdfa] p-8 text-center"><Megaphone size={28} className="mx-auto mb-3 text-[#d4a84b]" /><p className="text-lg font-semibold text-[#3d2c1e]">Nenhuma campanha criada.</p></div> : <div className="grid gap-4">{campaigns.map((campaign) => { const estimate = campaign.audience_estimate_json || {}; const op = campaign.operational_metrics || { recipientCount: 0, sentCount: 0, deliveredCount: 0, readCount: 0, clickCount: 0, replyCount: 0, bookingCount: 0, failureCount: 0, revenueGenerated: 0 }; const estimated = ["draft", "scheduled"].includes(campaign.status); return <div key={campaign.id} className="rounded-[24px] border border-[#eadfce] bg-[#fffdfa] p-5"><div className="flex flex-wrap items-center gap-2"><CampaignStatusBadge status={campaign.status} /><Badge variant="outline">{campaign.objective}</Badge><Badge variant="outline" className={estimated ? "border-amber-200 text-amber-700" : "border-emerald-200 text-emerald-700"}>{estimated ? "estimado" : "real"}</Badge></div><h4 className="mt-2 text-lg font-bold text-[#3d2c1e]">{campaign.name}</h4><p className="mt-2 text-sm text-[#6b5a4a] line-clamp-2">{campaign.message_body}</p><div className="mt-3 grid gap-3 sm:grid-cols-3"><div className="rounded-2xl bg-[#fdf8f3] p-3 text-xs"><p className="text-[#8a7b6d]">Publico</p><p className="mt-1 text-xl font-bold text-[#3d2c1e]">{estimated ? Number(estimate.audienceCount || 0) : Number(op.recipientCount || 0)}</p></div><div className="rounded-2xl bg-[#fdf8f3] p-3 text-xs"><p className="text-[#8a7b6d]">{estimated ? "Conversao" : "Respostas"}</p><p className="mt-1 text-xl font-bold text-[#3d2c1e]">{estimated ? `${Math.round(Number(estimate.estimatedConversionRate || 0) * 100)}%` : Number(op.replyCount || 0)}</p></div><div className="rounded-2xl bg-[#fdf8f3] p-3 text-xs"><p className="text-[#8a7b6d]">Receita</p><p className="mt-1 text-xl font-bold text-[#3d2c1e]">{money(estimated ? Number(estimate.estimatedRevenue || 0) : Number(op.revenueGenerated || 0))}</p></div></div>{!estimated && <div className="mt-3 rounded-2xl border border-[#eadfce] bg-white p-3 text-xs text-[#6b5a4a]">Funil: {op.sentCount} enviado • {op.deliveredCount} entregue • {op.readCount} lido • {op.replyCount} respondeu • {op.clickCount} clicou • {op.bookingCount} agendou</div>}<div className="mt-4 flex flex-wrap gap-2">{["draft", "scheduled", "paused"].includes(campaign.status) && <Button className="rounded-2xl bg-[#eebf9c] text-[#3d2c1e] hover:bg-[#d4a84b]" onClick={async () => { try { await startCampaign.mutateAsync({ campaignId: campaign.id }); toast.success("Envio iniciado."); } catch (e) { toast.error("Falha ao iniciar envio."); console.error(e); } }}><ArrowUpRight size={14} className="mr-2" />{campaign.status === "paused" ? "Retomar" : "Iniciar envio"}</Button>}{campaign.status === "processing" && <Button variant="outline" className="rounded-2xl border-[#eadfce]" onClick={async () => { try { await pauseCampaign.mutateAsync({ campaignId: campaign.id, reason: "manual_pause" }); toast.success("Campanha pausada."); } catch (e) { toast.error("Falha ao pausar campanha."); console.error(e); } }}><Clock3 size={14} className="mr-2" />Pausar</Button>}{!["cancelled", "completed"].includes(campaign.status) && <Button variant="ghost" className="rounded-2xl text-[#8a7b6d]" onClick={async () => { try { await cancelCampaign.mutateAsync({ campaignId: campaign.id, reason: "manual_cancel" }); toast.success("Campanha cancelada."); } catch (e) { toast.error("Falha ao cancelar campanha."); console.error(e); } }}>Cancelar</Button>}<Button variant="outline" className="rounded-2xl border-[#eadfce]" onClick={() => { setEditingCampaign(mapCampaignToForm(campaign)); setWizardOpen(true); }}><ArrowUpRight size={14} className="mr-2" />Continuar edicao</Button><Button variant="ghost" className="rounded-2xl" onClick={async () => { try { await cloneCampaign.mutateAsync(campaign.id); toast.success("Campanha duplicada."); } catch (e) { toast.error("Falha ao duplicar campanha."); console.error(e); } }}><Copy size={14} className="mr-2" />Duplicar</Button><Button variant="ghost" className="rounded-2xl" onClick={() => setSelectedCampaignId(campaign.id)}>Ver resultados</Button></div></div>; })}</div>}
+        </section>
+      </div>
+
+      <CampaignWizardDialog
+        open={wizardOpen}
+        onOpenChange={setWizardOpen}
+        initialValue={editingCampaign}
+        templates={templates}
+        onSubmit={async (form) => {
+          try {
+            await saveDraft.mutateAsync(form);
+            toast.success(form.id ? "Campanha atualizada." : "Rascunho salvo.");
+            setWizardOpen(false);
+          } catch (error) {
+            toast.error("Nao foi possivel salvar a campanha.");
+            console.error("save campaign error:", error);
+          }
+        }}
+        submitting={saveDraft.isPending}
+      />
+      <CampaignTemplateLibraryDialog open={templateLibraryOpen} onOpenChange={setTemplateLibraryOpen} templates={templates} onUseTemplate={(template) => { setEditingCampaign({ ...defaultCampaignForm, templateId: template.id, templateName: template.name, objective: template.objective as CampaignWizardForm["objective"], messageBody: template.body, messageMode: "hybrid" }); setWizardOpen(true); }} />
+
+      <Dialog open={!!selectedOpportunity} onOpenChange={(open) => !open && setSelectedOpportunity(null)}>
+        <DialogContent className="rounded-[28px] border-[#eadfce] bg-[#fffdf9] sm:max-w-[760px]">
+          <DialogHeader><DialogTitle className="text-2xl font-bold text-[#3d2c1e]">{selectedOpportunity?.title}</DialogTitle></DialogHeader>
+          {selectedOpportunity && <div className="space-y-4"><div className="grid gap-3 sm:grid-cols-3"><div className="rounded-2xl bg-[#fdf8f3] p-3"><p className="text-xs text-[#8a7b6d]">Publico</p><p className="mt-1 text-2xl font-bold text-[#3d2c1e]">{selectedOpportunity.audience_count}</p></div><div className="rounded-2xl bg-[#fdf8f3] p-3"><p className="text-xs text-[#8a7b6d]">Conversao</p><p className="mt-1 text-2xl font-bold text-[#3d2c1e]">{Math.round(selectedOpportunity.estimated_conversion_rate * 100)}%</p></div><div className="rounded-2xl bg-[#fdf8f3] p-3"><p className="text-xs text-[#8a7b6d]">Receita</p><p className="mt-1 text-2xl font-bold text-[#3d2c1e]">{money(selectedOpportunity.estimated_revenue)}</p></div></div><div className="rounded-2xl border border-[#eadfce] bg-white p-4"><p className="text-xs font-semibold uppercase tracking-[0.12em] text-[#a67a44]">Motivo</p><p className="mt-2 text-sm text-[#6b5a4a]">{selectedOpportunity.reason}</p></div></div>}
         </DialogContent>
       </Dialog>
 
-      {/* Send Confirmation AlertDialog */}
-      <AlertDialog open={confirmSend} onOpenChange={setConfirmSend}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Confirmar envio de campanha?</AlertDialogTitle>
-            <AlertDialogDescription>
-              A campanha "<strong>{name}</strong>" será enviada para{" "}
-              <strong>{targetCount}</strong> contato{targetCount !== 1 ? "s" : ""}. 
-              Esta ação não pode ser desfeita.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction onClick={handleSendConfirmed} disabled={sending}>
-              {sending ? "Enviando..." : "Confirmar Envio"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      {/* Campaign Detail Dialog */}
-      <Dialog open={!!detailCampaignId} onOpenChange={(open) => !open && setDetailCampaignId(null)}>
-        <DialogContent className="max-w-lg bg-background border-border max-h-[80vh] overflow-hidden flex flex-col">
-          <DialogHeader>
-            <DialogTitle className="text-foreground flex items-center gap-2">
-              <Megaphone size={18} className="text-accent" />
-              {(campaigns as Campaign[] | undefined)?.find(c => c.id === detailCampaignId)?.name || "Detalhes"}
-            </DialogTitle>
-          </DialogHeader>
-          {loadingContacts ? (
-            <div className="flex justify-center py-8"><Loader2 className="animate-spin text-muted-foreground" size={24} /></div>
-          ) : !contacts?.length ? (
-            <p className="text-sm text-muted-foreground text-center py-8">Nenhum contato registrado</p>
-          ) : (
-            <div className="overflow-y-auto space-y-2 pr-1">
-              <div className="flex items-center gap-3 mb-3 text-xs text-muted-foreground">
-                <span className="flex items-center gap-1"><CheckCircle2 size={12} className="text-emerald-600 dark:text-emerald-400" /> {(contacts as CampaignContact[]).filter(c => c.status === "sent").length} enviadas</span>
-                <span className="flex items-center gap-1"><XCircle size={12} className="text-destructive" /> {(contacts as CampaignContact[]).filter(c => c.status === "failed").length} falhas</span>
-                <span className="flex items-center gap-1"><Clock size={12} /> {(contacts as CampaignContact[]).filter(c => c.status === "pending").length} pendentes</span>
-              </div>
-              {(contacts as CampaignContact[]).map((contact) => {
-                const Icon = CONTACT_STATUS_ICONS[contact.status] || Clock;
-                return (
-                  <div key={contact.id} className="flex items-center justify-between p-3 rounded-xl bg-muted/30 border border-border/50">
-                    <div className="flex items-center gap-3 min-w-0">
-                      <Icon size={16} className={CONTACT_STATUS_COLORS[contact.status] || "text-muted-foreground"} />
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium text-foreground truncate">{contact.client_name || "Sem nome"}</p>
-                        <p className="text-xs text-muted-foreground flex items-center gap-1"><Phone size={10} /> {contact.phone}</p>
-                      </div>
-                    </div>
-                    <div className="text-right shrink-0 ml-2">
-                      <span className={cn("text-xs font-semibold", CONTACT_STATUS_COLORS[contact.status])}>
-                        {CONTACT_STATUS_LABELS[contact.status] || contact.status}
-                      </span>
-                      {contact.sent_at && (
-                        <p className="text-[10px] text-muted-foreground">{format(new Date(contact.sent_at), "HH:mm:ss")}</p>
-                      )}
-                      {contact.error_message && (
-                        <p className="text-[10px] text-destructive truncate max-w-[120px]" title={contact.error_message}>
-                          {contact.error_message.length > 30 ? contact.error_message.slice(0, 30) + "..." : contact.error_message}
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
-
-      {/* Addon Store Dialog */}
-      <Dialog open={showAddons} onOpenChange={setShowAddons}>
-        <DialogContent className="max-w-lg bg-background border-border max-h-[85vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="text-foreground flex items-center gap-2">
-              <Package size={18} className="text-accent" />
-              Loja de Extras
-            </DialogTitle>
-          </DialogHeader>
-          <div className="space-y-6 mt-2">
-            {(["reminders", "campaigns", "contacts"] as AddonType[]).map((type) => {
-              const typeLabels: Record<AddonType, string> = {
-                reminders: "📨 Lembretes Extras",
-                campaigns: "📣 Campanhas Extras",
-                contacts: "👥 Contatos por Campanha",
-              };
-              const typeDescs: Record<AddonType, string> = {
-                reminders: "Envie mais lembretes de agendamento por dia",
-                campaigns: "Envie mais campanhas de marketing por dia",
-                contacts: "Aumente o limite de contatos por campanha",
-              };
-              const packages = getPackagesByType(type);
-              return (
-                <div key={type}>
-                  <h3 className="font-semibold text-foreground mb-1">{typeLabels[type]}</h3>
-                  <p className="text-xs text-muted-foreground mb-3">{typeDescs[type]}</p>
-                  <div className="grid grid-cols-3 gap-2">
-                    {packages.map((pkg) => (
-                      <Button
-                        key={pkg.id}
-                        variant="outline"
-                        onClick={() => handleBuyAddon(pkg.priceId)}
-                        disabled={!!buyingAddon}
-                        className={cn(
-                          "flex flex-col items-center gap-1 h-auto py-3 hover:bg-accent/10 hover:border-accent/50",
-                          buyingAddon === pkg.priceId && "opacity-50"
-                        )}
-                      >
-                        <span className="text-lg font-bold text-foreground">{pkg.quantity}</span>
-                        <span className="text-[10px] text-muted-foreground">{type === "reminders" ? "lembretes" : type === "campaigns" ? "campanhas" : "contatos"}</span>
-                        <span className="text-xs font-semibold text-accent mt-1">{pkg.priceDisplay}</span>
-                        {buyingAddon === pkg.priceId && <Loader2 size={12} className="animate-spin text-accent" />}
-                      </Button>
-                    ))}
-                  </div>
-                </div>
-              );
-            })}
-            <div className="flex items-start gap-2 bg-accent/5 rounded-xl p-3">
-              <AlertTriangle size={14} className="text-accent mt-0.5 shrink-0" />
-              <p className="text-xs text-muted-foreground">
-                Os extras são adicionados ao seu limite atual do plano. Após o pagamento, o crédito é aplicado automaticamente à sua conta.
-              </p>
-            </div>
-
-            {/* Purchase History */}
-            {purchases && purchases.length > 0 && (
-              <div>
-                <h3 className="font-semibold text-foreground mb-2 flex items-center gap-2">
-                  <Receipt size={16} className="text-accent" /> Histórico de Compras
-                </h3>
-                <div className="space-y-2 max-h-48 overflow-y-auto">
-                  {(purchases as AddonPurchase[]).map((p) => {
-                    const typeLabels: Record<string, string> = { reminders: "Lembretes", campaigns: "Campanhas", contacts: "Contatos" };
-                    const typeEmojis: Record<string, string> = { reminders: "📨", campaigns: "📣", contacts: "👥" };
-                    return (
-                      <div key={p.id} className="flex items-center justify-between p-2.5 rounded-xl bg-muted/30 border border-border/50">
-                        <div className="flex items-center gap-2 min-w-0">
-                          <span className="text-sm">{typeEmojis[p.addon_type] || "📦"}</span>
-                          <div className="min-w-0">
-                            <p className="text-sm font-medium text-foreground">
-                              +{p.quantity} {typeLabels[p.addon_type] || p.addon_type}
-                            </p>
-                            <p className="text-[10px] text-muted-foreground">
-                              {format(new Date(p.created_at), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
-                            </p>
-                          </div>
-                        </div>
-                        <span className="text-xs font-semibold text-accent shrink-0">
-                          R$ {(p.amount_cents / 100).toFixed(2).replace(".", ",")}
-                        </span>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-          </div>
+      <Dialog open={!!selectedCampaignId} onOpenChange={(open) => !open && setSelectedCampaignId(null)}>
+        <DialogContent className="max-h-[90vh] overflow-y-auto rounded-[28px] border-[#eadfce] bg-[#fffdf9] sm:max-w-[920px]">
+          <DialogHeader><DialogTitle className="text-2xl font-bold text-[#3d2c1e]">{campaignDetails.data?.campaign?.name || "Resultados da campanha"}</DialogTitle></DialogHeader>
+          {campaignDetails.isLoading ? <div className="flex items-center gap-2 py-8 text-sm text-[#8a7b6d]"><Loader2 size={16} className="animate-spin" />Carregando resultados...</div> : campaignDetails.data ? <div className="space-y-4"><div className="rounded-2xl border border-[#eadfce] bg-white p-4 text-sm text-[#6b5a4a]">Funil real: {campaignDetails.data.summary.sentCount} enviado • {campaignDetails.data.summary.deliveredCount} entregue • {campaignDetails.data.summary.readCount} lido • {campaignDetails.data.summary.replyCount} respondeu • {campaignDetails.data.summary.clickCount} clicou • {campaignDetails.data.summary.bookingCount} agendou</div><div className="grid gap-3 sm:grid-cols-3"><div className="rounded-2xl bg-[#fdf8f3] p-4"><p className="text-xs text-[#8a7b6d]">Falhas</p><p className="mt-1 text-2xl font-bold text-[#3d2c1e]">{campaignDetails.data.summary.failureCount}</p></div><div className="rounded-2xl bg-[#fdf8f3] p-4"><p className="text-xs text-[#8a7b6d]">Opt-out</p><p className="mt-1 text-2xl font-bold text-[#3d2c1e]">{campaignDetails.data.summary.optOutCount}</p></div><div className="rounded-2xl bg-[#fdf8f3] p-4"><p className="text-xs text-[#8a7b6d]">Receita</p><p className="mt-1 text-2xl font-bold text-[#3d2c1e]">{money(campaignDetails.data.summary.revenueGenerated)}</p></div></div></div> : <p className="py-8 text-sm text-[#8a7b6d]">Selecione uma campanha para ver resultados.</p>}
         </DialogContent>
       </Dialog>
     </DashboardLayout>

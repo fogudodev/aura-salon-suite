@@ -18,6 +18,18 @@ verify_jwt = false
 [functions.send-campaign]
 verify_jwt = false
 
+[functions.whatsapp-campaigns]
+verify_jwt = false
+
+[functions.whatsapp-campaign-worker]
+verify_jwt = false
+
+[functions.whatsapp-campaign-click]
+verify_jwt = false
+
+[functions.whatsapp-campaign-automation-worker]
+verify_jwt = false
+
 [functions.admin-create-professional]
 verify_jwt = false
 
