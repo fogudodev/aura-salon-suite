@@ -4,7 +4,9 @@ import { useAuth } from "@/hooks/useAuth";
 import { useProfessional } from "@/hooks/useProfessional";
 import { useReceptionEmployee } from "@/hooks/useReceptionEmployee";
 import { useFeatureAccess } from "@/hooks/useFeatureAccess";
+import { useMyFeatureGate } from "@/hooks/useMyFeatureGate";
 import { useIsAdmin, useIsSupport } from "@/hooks/useAdmin";
+import { APP_ROUTE_FLAG_KEYS, RECEPTION_ALLOWED_ROUTES } from "@/lib/feature-gates";
 import { ShieldAlert } from "lucide-react";
 import UpgradeModal from "@/components/layout/UpgradeModal";
 import type { FeatureKey } from "@/lib/stripe-plans";
@@ -31,6 +33,8 @@ const ROUTE_TO_FEATURE: Record<string, FeatureKey> = {
   "/payment-chat": "payment-chat",
   "/ai-assistant": "ai-assistant",
   "/cash-register": "cash-register",
+  "/upsell": "upsell",
+  "/upsell/config": "upsell",
   "/instagram-automation": "automations",
   "/rewards": "rewards",
   "/courses": "courses",
@@ -58,6 +62,8 @@ const ROUTE_TO_LABEL: Record<string, string> = {
   "/payment-chat": "Chat Pagamento",
   "/ai-assistant": "Assistente IA",
   "/cash-register": "Caixa",
+  "/upsell": "Upsell Inteligente",
+  "/upsell/config": "Upsell Inteligente",
   "/instagram-automation": "Instagram DM",
   "/rewards": "Gende Rewards",
   "/courses": "Gende Cursos",
@@ -69,22 +75,25 @@ const ROUTE_TO_LABEL: Record<string, string> = {
   "/courses/finance": "Gende Cursos",
 };
 
-// Routes accessible by reception employees
-const RECEPTION_ROUTES = [
-  "/", "/bookings", "/clients", "/cash-register", "/automations",
-];
-
 const ProtectedRoute = ({ children }: { children: ReactNode }) => {
   const { user, loading, signOut } = useAuth();
   const { data: professional, isLoading: profLoading } = useProfessional();
   const { data: reception, isLoading: receptionLoading } = useReceptionEmployee();
   const { isLocked, requiredPlan, isLoading: planLoading } = useFeatureAccess();
+  const { isFeatureDisabledForMe, isLoading: featureGateLoading } = useMyFeatureGate();
   const { data: isAdmin, isLoading: adminLoading } = useIsAdmin();
   const { data: isSupport, isLoading: supportLoading } = useIsSupport();
   const location = useLocation();
   const [upgradeOpen, setUpgradeOpen] = useState(false);
+  const routeFlagKey = APP_ROUTE_FLAG_KEYS[location.pathname];
+  const isRouteDisabled = routeFlagKey ? isFeatureDisabledForMe(routeFlagKey) : false;
+  const receptionFallbackRoute =
+    RECEPTION_ALLOWED_ROUTES.find((path) => {
+      const flagKey = APP_ROUTE_FLAG_KEYS[path];
+      return !flagKey || !isFeatureDisabledForMe(flagKey);
+    }) || "/bookings";
 
-  if (loading || profLoading || receptionLoading || planLoading || adminLoading || supportLoading) {
+  if (loading || profLoading || receptionLoading || planLoading || featureGateLoading || adminLoading || supportLoading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="w-8 h-8 border-3 border-accent/30 border-t-accent rounded-full animate-spin" />
@@ -103,8 +112,8 @@ const ProtectedRoute = ({ children }: { children: ReactNode }) => {
 
   // Reception employee flow
   if (reception && !professional) {
-    if (!RECEPTION_ROUTES.includes(location.pathname)) {
-      return <Navigate to="/bookings" replace />;
+    if (!RECEPTION_ALLOWED_ROUTES.includes(location.pathname) || isRouteDisabled) {
+      return <Navigate to={receptionFallbackRoute} replace />;
     }
     return <>{children}</>;
   }
@@ -134,7 +143,11 @@ const ProtectedRoute = ({ children }: { children: ReactNode }) => {
     );
   }
 
-  // Admin bypasses all plan restrictions
+  // Admin bypasses plan and feature-flag restrictions
+  if (!isAdmin && isRouteDisabled) {
+    return <Navigate to="/" replace />;
+  }
+
   const featureKey = ROUTE_TO_FEATURE[location.pathname];
   if (featureKey && !isAdmin && isLocked(featureKey)) {
     const label = ROUTE_TO_LABEL[location.pathname] || featureKey;

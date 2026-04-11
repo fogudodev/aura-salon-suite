@@ -19,9 +19,22 @@ type Suggestion = {
   promoPrice: number | null;
 };
 
+type SuggestionApiItem = {
+  service?: {
+    id?: string;
+    name?: string;
+    price?: number;
+    duration_minutes?: number;
+  } | null;
+  promo_message?: string | null;
+  promo_price?: number | null;
+};
+
 interface UpsellSuggestionsProps {
   professionalId: string;
+  professionalSlug?: string;
   sourceServiceId: string;
+  clientPhone?: string;
   services: Service[];
   accent: string;
   textPrimary: string;
@@ -32,7 +45,9 @@ interface UpsellSuggestionsProps {
 
 const UpsellSuggestions = ({
   professionalId,
+  professionalSlug,
   sourceServiceId,
+  clientPhone,
   services,
   accent,
   textPrimary,
@@ -46,57 +61,18 @@ const UpsellSuggestions = ({
   useEffect(() => {
     const fetchSuggestions = async () => {
       setLoading(true);
-
-      // First try: manual rules from DB
-      const { data: rules } = await api
-        .from("upsell_rules" as any)
-        .select("id, recommended_service_id, promo_message, promo_price, priority")
-        .eq("professional_id", professionalId)
-        .eq("source_service_id", sourceServiceId)
-        .eq("is_active", true)
-        .order("priority", { ascending: true })
-        .limit(3);
-
-      const typedRules = (rules || []) as unknown as {
-        id: string;
-        recommended_service_id: string;
-        promo_message: string | null;
-        promo_price: number | null;
-      }[];
-
-      if (typedRules.length > 0) {
-        // Map rules to suggestions using services list
-        const mapped = typedRules
-          .map(rule => {
-            const svc = services.find(s => s.id === rule.recommended_service_id);
-            if (!svc) return null;
-            return {
-              id: svc.id,
-              name: svc.name,
-              price: svc.price,
-              duration_minutes: svc.duration_minutes,
-              promoMessage: rule.promo_message,
-              promoPrice: rule.promo_price,
-            };
-          })
-          .filter(Boolean) as Suggestion[];
-
-        if (mapped.length > 0) {
-          setSuggestions(mapped);
-          trackSuggestionEvents(mapped);
-          setLoading(false);
-          return;
-        }
-      }
-
-      // Fallback: AI-based suggestions via edge function
       try {
         const { data, error } = await api.functions.invoke("upsell-suggest", {
-          body: { professionalId, sourceServiceId },
+          body: {
+            slug: professionalSlug || null,
+            professionalId,
+            sourceServiceId,
+            clientPhone: clientPhone || null,
+          },
         });
 
         if (!error && data?.suggestions?.length > 0) {
-          const aiSuggestions = data.suggestions.map((s: any) => ({
+          const aiSuggestions = (data.suggestions as SuggestionApiItem[]).map((s) => ({
             id: s.service?.id || "",
             name: s.service?.name || "",
             price: s.service?.price || 0,
@@ -106,29 +82,19 @@ const UpsellSuggestions = ({
           })).filter((s: Suggestion) => s.id);
 
           setSuggestions(aiSuggestions);
-          trackSuggestionEvents(aiSuggestions);
+        } else {
+          setSuggestions([]);
         }
       } catch {
         // Silently fail - upsell is not critical
+        setSuggestions([]);
       }
 
       setLoading(false);
     };
 
-    const trackSuggestionEvents = async (items: Suggestion[]) => {
-      for (const item of items) {
-        await api.from("upsell_events" as any).insert({
-          professional_id: professionalId,
-          source_service_id: sourceServiceId,
-          recommended_service_id: item.id,
-          channel: "web",
-          status: "suggested",
-        } as any);
-      }
-    };
-
     if (professionalId && sourceServiceId) fetchSuggestions();
-  }, [professionalId, sourceServiceId]);
+  }, [professionalId, professionalSlug, sourceServiceId, clientPhone]);
 
   if (loading || suggestions.length === 0) return null;
 
