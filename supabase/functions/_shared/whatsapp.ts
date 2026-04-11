@@ -38,6 +38,9 @@ export type SendWhatsAppMessageInput = {
   professionalId: string;
   recipient: string;
   message: string;
+  idempotencyKey?: string | null;
+  campaignId?: string | null;
+  campaignRecipientId?: string | null;
   instance?: InstanceLike | null;
   automationId?: string | null;
   bookingId?: string | null;
@@ -113,6 +116,29 @@ export function normalizeEvolutionRecipient(recipient: string | null | undefined
   if (value.includes("@lid")) return value.toLowerCase();
   if (value.includes("@s.whatsapp.net") || value.includes("@c.us")) return value.toLowerCase();
   return normalizePhoneDigits(value);
+}
+
+function extractProviderMessageId(payload: unknown): string | null {
+  if (!payload || typeof payload !== "object") return null;
+  const record = payload as Record<string, unknown>;
+  const direct = record.messageId || record.id || record.message_id || record.msgId;
+  if (typeof direct === "string" && direct.trim()) return direct.trim();
+
+  if (Array.isArray(record.messages) && record.messages[0] && typeof record.messages[0] === "object") {
+    const nested = record.messages[0] as Record<string, unknown>;
+    if (typeof nested.id === "string" && nested.id.trim()) return nested.id.trim();
+  }
+
+  if (record.key && typeof record.key === "object") {
+    const keyRecord = record.key as Record<string, unknown>;
+    if (typeof keyRecord.id === "string" && keyRecord.id.trim()) return keyRecord.id.trim();
+  }
+
+  if (record.data && typeof record.data === "object") {
+    return extractProviderMessageId(record.data);
+  }
+
+  return null;
 }
 
 async function readResponseBody(res: Response): Promise<unknown> {
@@ -210,28 +236,44 @@ async function logOutboundResult(
   supabase: SupabaseClient,
   input: {
     professionalId: string;
+    campaignId?: string | null;
+    campaignRecipientId?: string | null;
+    idempotencyKey?: string | null;
     automationId?: string | null;
     bookingId?: string | null;
     provider: WhatsappProvider | null;
     recipientPhone: string;
     message: string;
     success: boolean;
+    statusOverride?: string | null;
+    providerMessageId?: string | null;
     responseBody?: unknown;
     error?: string;
   },
 ) {
   try {
-    const { error } = await supabase.from("whatsapp_logs").insert({
+    const payload = {
       professional_id: input.professionalId,
+      campaign_id: input.campaignId ?? null,
+      campaign_recipient_id: input.campaignRecipientId ?? null,
+      idempotency_key: input.idempotencyKey ?? null,
+      provider_message_id: input.providerMessageId ?? null,
       automation_id: input.automationId ?? null,
       booking_id: input.bookingId ?? null,
       recipient_phone: input.recipientPhone,
       message_content: input.message,
       provider: input.provider ?? "unknown",
-      status: input.success ? "sent" : "failed",
+      status: input.statusOverride || (input.success ? "sent" : "failed"),
       sent_at: input.success ? new Date().toISOString() : null,
       error_message: input.success ? null : (input.error || JSON.stringify(input.responseBody ?? {})),
-    });
+      response_payload_json: (typeof input.responseBody === "object" && input.responseBody)
+        ? input.responseBody
+        : { raw: String(input.responseBody ?? "") },
+    };
+
+    const { error } = input.idempotencyKey
+      ? await supabase.from("whatsapp_logs").upsert(payload, { onConflict: "professional_id,idempotency_key" })
+      : await supabase.from("whatsapp_logs").insert(payload);
 
     if (error) {
       console.error("whatsapp_logs insert error:", error);
@@ -239,6 +281,53 @@ async function logOutboundResult(
   } catch (error) {
     console.error("whatsapp_logs unexpected error:", error);
   }
+}
+
+async function readIdempotencyLog(
+  supabase: SupabaseClient,
+  professionalId: string,
+  idempotencyKey: string,
+) {
+  const { data, error } = await supabase
+    .from("whatsapp_logs")
+    .select("*")
+    .eq("professional_id", professionalId)
+    .eq("idempotency_key", idempotencyKey)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return data as Record<string, unknown> | null;
+}
+
+async function upsertIdempotencyProcessing(params: {
+  supabase: SupabaseClient;
+  professionalId: string;
+  idempotencyKey: string;
+  campaignId?: string | null;
+  campaignRecipientId?: string | null;
+  automationId?: string | null;
+  bookingId?: string | null;
+  provider?: WhatsappProvider | null;
+  recipientPhone: string;
+  message: string;
+}) {
+  const { error } = await params.supabase.from("whatsapp_logs").upsert({
+    professional_id: params.professionalId,
+    campaign_id: params.campaignId ?? null,
+    campaign_recipient_id: params.campaignRecipientId ?? null,
+    idempotency_key: params.idempotencyKey,
+    automation_id: params.automationId ?? null,
+    booking_id: params.bookingId ?? null,
+    provider: params.provider ?? "unknown",
+    recipient_phone: params.recipientPhone,
+    message_content: params.message,
+    status: "processing",
+    sent_at: null,
+    error_message: null,
+    response_payload_json: {},
+  }, { onConflict: "professional_id,idempotency_key" });
+  if (error) throw error;
 }
 
 async function sendViaEvolution(
@@ -353,6 +442,7 @@ export async function sendWhatsAppMessage(
   const normalizedRecipient = normalizePhoneDigits(input.recipient);
   const evolutionRecipient = normalizeEvolutionRecipient(input.recipient);
   const preferredProvider = input.preferredProvider ?? "evolution";
+  const idempotencyKey = String(input.idempotencyKey || "").trim() || null;
 
   const officialAvailable = !!(instance?.meta_phone_id && getOfficialToken());
   const evolutionAvailable = !!(instance?.instance_name && getEvolutionConfig());
@@ -367,12 +457,102 @@ export async function sendWhatsAppMessage(
   let lastStatus = 0;
   let lastBody: unknown = null;
   let successfulProvider: WhatsappProvider | null = null;
+  let uncertainFailure = false;
+
+  if (idempotencyKey) {
+    const existing = await readIdempotencyLog(input.supabase, input.professionalId, idempotencyKey);
+    if (existing) {
+      const status = String(existing.status || "").toLowerCase();
+      if (status === "sent") {
+        return {
+          success: true,
+          provider: (String(existing.provider || "").toLowerCase() === "official" ? "official" : "evolution"),
+          attemptedProviders: [],
+          normalizedRecipient,
+          evolutionRecipient,
+          responseStatus: undefined,
+          responseBody: existing.response_payload_json || null,
+        };
+      }
+
+      if (status === "uncertain") {
+        return {
+          success: false,
+          provider: null,
+          attemptedProviders: [],
+          normalizedRecipient,
+          evolutionRecipient,
+          responseStatus: undefined,
+          responseBody: existing.response_payload_json || null,
+          error: "SEND_UNCERTAIN",
+        };
+      }
+
+      if (status === "processing") {
+        const updatedAtRaw = String(existing.updated_at || existing.created_at || "");
+        const updatedAtMs = updatedAtRaw ? new Date(updatedAtRaw).getTime() : 0;
+        const inflightWindowMs = Math.max(Number(Deno.env.get("WHATSAPP_IDEMPOTENCY_IN_FLIGHT_SECONDS") || "420"), 30) * 1000;
+        if (updatedAtMs && Date.now() - updatedAtMs <= inflightWindowMs) {
+          return {
+            success: false,
+            provider: null,
+            attemptedProviders: [],
+            normalizedRecipient,
+            evolutionRecipient,
+            responseStatus: 202,
+            responseBody: existing.response_payload_json || null,
+            error: "IDEMPOTENCY_IN_FLIGHT",
+          };
+        }
+      }
+    }
+
+    try {
+      await upsertIdempotencyProcessing({
+        supabase: input.supabase,
+        professionalId: input.professionalId,
+        idempotencyKey,
+        campaignId: input.campaignId,
+        campaignRecipientId: input.campaignRecipientId,
+        automationId: input.automationId,
+        bookingId: input.bookingId,
+        provider: null,
+        recipientPhone: normalizedRecipient || evolutionRecipient || input.recipient,
+        message: input.message,
+      });
+    } catch (error) {
+      console.error("idempotency preflight failed:", error);
+      return {
+        success: false,
+        provider: null,
+        attemptedProviders: [],
+        normalizedRecipient,
+        evolutionRecipient,
+        error: "IDEMPOTENCY_PREFLIGHT_FAILED",
+      };
+    }
+  }
 
   for (const provider of orderedProviders) {
     if (provider === "evolution" && (!evolutionAvailable || !instance?.instance_name)) continue;
     if (provider === "official" && (!officialAvailable || !instance?.meta_phone_id)) continue;
 
     attemptedProviders.push(provider);
+
+    if (idempotencyKey) {
+      await upsertIdempotencyProcessing({
+        supabase: input.supabase,
+        professionalId: input.professionalId,
+        idempotencyKey,
+        campaignId: input.campaignId,
+        campaignRecipientId: input.campaignRecipientId,
+        automationId: input.automationId,
+        bookingId: input.bookingId,
+        provider,
+        recipientPhone: normalizedRecipient || evolutionRecipient || input.recipient,
+        message: input.message,
+      });
+    }
 
     await insertWhatsAppEventLog(input.supabase, {
       professionalId: input.professionalId,
@@ -406,12 +586,16 @@ export async function sendWhatsAppMessage(
 
         await logOutboundResult(input.supabase, {
           professionalId: input.professionalId,
+          campaignId: input.campaignId,
+          campaignRecipientId: input.campaignRecipientId,
+          idempotencyKey,
           automationId: input.automationId,
           bookingId: input.bookingId,
           provider,
           recipientPhone: result.recipient || input.recipient,
           message: input.message,
           success: true,
+          providerMessageId: extractProviderMessageId(result.body),
           responseBody: result.body,
         });
 
@@ -446,6 +630,9 @@ export async function sendWhatsAppMessage(
       }
 
       lastError = typeof result.body === "string" ? result.body : JSON.stringify(result.body ?? {});
+      if ((result.status || 0) >= 500 || result.status === 408 || result.status === 409 || result.status === 425 || result.status === 429) {
+        uncertainFailure = true;
+      }
 
       if (provider === "evolution" && (result.status === 404 || result.status === 410) && instance?.instance_name) {
         await input.supabase
@@ -475,6 +662,7 @@ export async function sendWhatsAppMessage(
       });
     } catch (error) {
       lastError = error instanceof Error ? error.message : String(error);
+      uncertainFailure = true;
       await insertWhatsAppEventLog(input.supabase, {
         professionalId: input.professionalId,
         conversationId: input.conversationId,
@@ -495,14 +683,18 @@ export async function sendWhatsAppMessage(
 
   await logOutboundResult(input.supabase, {
     professionalId: input.professionalId,
+    campaignId: input.campaignId,
+    campaignRecipientId: input.campaignRecipientId,
+    idempotencyKey,
     automationId: input.automationId,
     bookingId: input.bookingId,
     provider: successfulProvider,
     recipientPhone: normalizedRecipient || evolutionRecipient || input.recipient,
     message: input.message,
     success: false,
+    statusOverride: uncertainFailure ? "uncertain" : "failed",
     responseBody: lastBody,
-    error: lastError || "No provider available",
+    error: uncertainFailure ? (lastError || "uncertain_provider_failure") : (lastError || "No provider available"),
   });
 
   return {
@@ -513,6 +705,6 @@ export async function sendWhatsAppMessage(
     evolutionRecipient,
     responseStatus: lastStatus || undefined,
     responseBody: lastBody,
-    error: lastError || "No provider available",
+    error: uncertainFailure ? "SEND_UNCERTAIN" : (lastError || "No provider available"),
   };
 }

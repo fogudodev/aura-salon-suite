@@ -9,6 +9,7 @@ import {
   sendWhatsAppMessage,
   type WhatsappProvider,
 } from "../_shared/whatsapp.ts";
+import { trackCampaignInboundReply, trackCampaignProviderStatus } from "../_shared/campaigns/execution.ts";
 import { generateAIResponse } from "../_shared/ai-router.ts";
 
 const corsHeaders = {
@@ -43,6 +44,7 @@ type ParsedInboundEvent =
       normalizedPhone: string;
       text: string | null;
       contentType: "text" | "audio" | "media";
+      replyToMessageId?: string | null;
       audioKey?: Record<string, unknown> | null;
       audioMimeType?: string | null;
       audioMediaId?: string | null;
@@ -1125,6 +1127,8 @@ function parseEvolutionEvent(body: Record<string, unknown>): ParsedInboundEvent 
   const clientIdentifier = normalizeConversationClientId(remoteJid);
   const normalizedPhone = normalizePhoneDigits(remoteJid);
   const rawMessage = (messageEnvelope.message as Record<string, unknown> | undefined) || (messageData.message as Record<string, unknown> | undefined) || {};
+  const messageContext = (rawMessage.messageContextInfo as Record<string, unknown> | undefined) || {};
+  const quotedByContext = String(messageContext.stanzaId || messageContext.id || "") || null;
   const messageId = String(key.id || `${instanceName}:${clientIdentifier}:${messageData.messageTimestamp || Date.now()}`);
 
   if (!clientIdentifier || !instanceName) {
@@ -1142,10 +1146,13 @@ function parseEvolutionEvent(body: Record<string, unknown>): ParsedInboundEvent 
       normalizedPhone,
       text: rawMessage.conversation.trim(),
       contentType: "text",
+      replyToMessageId: quotedByContext,
     };
   }
 
   const extendedText = rawMessage.extendedTextMessage as Record<string, unknown> | undefined;
+  const extendedContext = (extendedText?.contextInfo as Record<string, unknown> | undefined) || {};
+  const quotedByExtended = String(extendedContext.stanzaId || extendedContext.id || quotedByContext || "") || null;
   if (typeof extendedText?.text === "string" && extendedText.text.trim()) {
     return {
       kind: "message",
@@ -1157,6 +1164,7 @@ function parseEvolutionEvent(body: Record<string, unknown>): ParsedInboundEvent 
       normalizedPhone,
       text: extendedText.text.trim(),
       contentType: "text",
+      replyToMessageId: quotedByExtended,
     };
   }
 
@@ -1225,6 +1233,8 @@ function parseOfficialEvent(body: Record<string, unknown>): ParsedInboundEvent {
   const metaPhoneId = String(metadata.phone_number_id || "");
   const messageId = String(message.id || `${metaPhoneId}:${clientIdentifier}:${Date.now()}`);
   const messageType = String(message.type || "text");
+  const messageContext = (message.context as Record<string, unknown> | undefined) || {};
+  const replyToMessageId = String(messageContext.id || "") || null;
 
   if (!clientIdentifier || !metaPhoneId) {
     return { kind: "ignore", provider: "official", reason: "missing_official_identifiers" };
@@ -1244,6 +1254,7 @@ function parseOfficialEvent(body: Record<string, unknown>): ParsedInboundEvent {
       normalizedPhone,
       text: textBody,
       contentType: "text",
+      replyToMessageId,
     };
   }
 
@@ -1292,6 +1303,43 @@ function parseOfficialEvent(body: Record<string, unknown>): ParsedInboundEvent {
       message_type: messageType,
     },
   };
+}
+
+function extractOfficialStatusEvents(body: Record<string, unknown>) {
+  const entries = Array.isArray(body.entry) ? body.entry : [];
+  return entries.flatMap((entry) => {
+    const changes = Array.isArray((entry as Record<string, unknown>).changes)
+      ? ((entry as Record<string, unknown>).changes as Array<Record<string, unknown>>)
+      : [];
+
+    return changes.flatMap((change) => {
+      const value = (change.value as Record<string, unknown> | undefined) || {};
+      const metadata = (value.metadata as Record<string, unknown> | undefined) || {};
+      const statuses = Array.isArray(value.statuses) ? value.statuses as Array<Record<string, unknown>> : [];
+      const metaPhoneId = String(metadata.phone_number_id || "");
+
+      return statuses.map((status) => ({
+        metaPhoneId,
+        providerMessageId: String(status.id || ""),
+        status: String(status.status || "").toLowerCase(),
+        recipient: String(status.recipient_id || ""),
+        payload: status,
+      })).filter((status) => status.metaPhoneId && status.providerMessageId && status.status);
+    });
+  });
+}
+
+function hasOfficialMessages(body: Record<string, unknown>) {
+  const entries = Array.isArray(body.entry) ? body.entry : [];
+  return entries.some((entry) => {
+    const changes = Array.isArray((entry as Record<string, unknown>).changes)
+      ? ((entry as Record<string, unknown>).changes as Array<Record<string, unknown>>)
+      : [];
+    return changes.some((change) => {
+      const value = (change.value as Record<string, unknown> | undefined) || {};
+      return Array.isArray(value.messages) && value.messages.length > 0;
+    });
+  });
 }
 
 function parseInboundEvent(body: Record<string, unknown>): ParsedInboundEvent {
@@ -1576,6 +1624,38 @@ serve(async (req) => {
   try {
     const body = await req.json();
 
+    const officialStatusEvents = extractOfficialStatusEvents(body);
+    if (officialStatusEvents.length > 0) {
+      for (const statusEvent of officialStatusEvents) {
+        const { data: instance } = await supabase
+          .from("whatsapp_instances")
+          .select("professional_id")
+          .eq("meta_phone_id", statusEvent.metaPhoneId)
+          .maybeSingle();
+
+        if (!instance?.professional_id) continue;
+
+        const mappedStatus = statusEvent.status === "delivered" || statusEvent.status === "read" || statusEvent.status === "failed"
+          ? statusEvent.status
+          : "sent";
+
+        await trackCampaignProviderStatus({
+          supabase,
+          providerMessageId: statusEvent.providerMessageId,
+          status: mappedStatus,
+          payload: {
+            recipient: statusEvent.recipient,
+            provider: "official",
+            raw_status: statusEvent.status,
+            ...(statusEvent.payload || {}),
+          },
+        });
+      }
+      if (!hasOfficialMessages(body)) {
+        return safeResponse({ provider: "official", statusEvents: officialStatusEvents.length });
+      }
+    }
+
     if (body.action === "send-follow-up") {
       try {
         await handleFollowUp(supabase, body);
@@ -1641,6 +1721,7 @@ serve(async (req) => {
     }
 
     const professionalId = String(instance.professional_id);
+
     const inboundAccepted = await markInboundMessageReceived(supabase, {
       professionalId,
       instanceName: String(instance.instance_name || parsedEvent.instanceName || ""),
@@ -1659,6 +1740,54 @@ serve(async (req) => {
 
     if (!inboundAccepted) {
       return safeResponse({ duplicate: true });
+    }
+
+    if (parsedEvent.contentType === "text" && parsedEvent.text?.trim()) {
+      const campaignReply = await trackCampaignInboundReply({
+        supabase,
+        professionalId,
+        normalizedPhone: parsedEvent.normalizedPhone,
+        messageId: parsedEvent.messageId,
+        replyToMessageId: parsedEvent.replyToMessageId || null,
+        text: parsedEvent.text,
+        payload: {
+          provider: parsedEvent.provider,
+          clientIdentifier: parsedEvent.clientIdentifier,
+        },
+      });
+
+      if ((campaignReply as { ambiguous?: boolean }).ambiguous) {
+        await insertWhatsAppEventLog(supabase, {
+          professionalId,
+          instanceName: String(instance.instance_name || parsedEvent.instanceName || ""),
+          provider: parsedEvent.provider,
+          direction: "inbound",
+          eventType: "campaign_reply_ambiguous",
+          messageId: parsedEvent.messageId,
+          clientIdentifier: parsedEvent.clientIdentifier,
+          normalizedPhone: parsedEvent.normalizedPhone,
+          status: "warning",
+          details: {
+            reply_to_message_id: parsedEvent.replyToMessageId || null,
+          },
+        });
+      }
+
+      if (campaignReply.matched && campaignReply.optOut) {
+        await insertWhatsAppEventLog(supabase, {
+          professionalId,
+          instanceName: String(instance.instance_name || parsedEvent.instanceName || ""),
+          provider: parsedEvent.provider,
+          direction: "inbound",
+          eventType: "campaign_opt_out_received",
+          messageId: parsedEvent.messageId,
+          clientIdentifier: parsedEvent.clientIdentifier,
+          normalizedPhone: parsedEvent.normalizedPhone,
+          status: "processed",
+        });
+
+        return safeResponse({ provider: parsedEvent.provider, optOut: true });
+      }
     }
 
     const { data: professional } = await supabase
