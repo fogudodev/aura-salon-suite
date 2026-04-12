@@ -7,6 +7,8 @@ import {
 import { detectLisOpportunities } from "./opportunity-engine.ts";
 import { getAppBaseUrl } from "./runtime-config.ts";
 
+type PreferredProvider = "evolution" | "official";
+
 function buildCooldownKey(professionalId: string, dedupeKey: string) {
   return `${professionalId}:${dedupeKey}`;
 }
@@ -48,6 +50,27 @@ function buildProviderFailureReason(input: {
     if (raw) parts.push(raw);
   }
   return parts.join(" | ") || "notification_failed";
+}
+
+function normalizePreferredProvider(value: unknown): PreferredProvider {
+  return typeof value === "string" && value.toLowerCase() === "official" ? "official" : "evolution";
+}
+
+function resolveNotificationPreferredProvider(params: {
+  requested?: unknown;
+  instance: Record<string, unknown> | null;
+}): PreferredProvider {
+  const requested = normalizePreferredProvider(params.requested);
+  const hasEvolution = !!(
+    String(params.instance?.instance_name || "").trim() &&
+    String(params.instance?.status || "").toLowerCase() === "connected"
+  );
+  const hasOfficial = !!String(params.instance?.meta_phone_id || "").trim();
+
+  if (requested === "official" && hasOfficial) return "official";
+  if (requested === "evolution" && hasEvolution) return "evolution";
+  if (hasOfficial) return "official";
+  return "evolution";
 }
 
 export async function syncLisRadarOpportunities(params: {
@@ -141,8 +164,9 @@ export async function notifyProfessionalAboutOpportunity(params: {
   supabase: SupabaseClient;
   professionalId: string;
   opportunityId: string;
+  preferredProvider?: PreferredProvider;
 }) {
-  const { supabase, professionalId, opportunityId } = params;
+  const { supabase, professionalId, opportunityId, preferredProvider } = params;
   const [{ data: professional }, { data: opportunity }, instanceRes] = await Promise.all([
     supabase
       .from("professionals")
@@ -159,7 +183,6 @@ export async function notifyProfessionalAboutOpportunity(params: {
       .from("whatsapp_instances")
       .select("professional_id, instance_name, meta_phone_id, status, updated_at")
       .eq("professional_id", professionalId)
-      .eq("status", "connected")
       .order("updated_at", { ascending: false })
       .limit(1)
       .maybeSingle(),
@@ -245,13 +268,18 @@ export async function notifyProfessionalAboutOpportunity(params: {
     return { skipped: true, reason: !professional.phone ? "professional_phone_missing" : "whatsapp_not_connected" };
   }
 
+  const selectedPreferredProvider = resolveNotificationPreferredProvider({
+    requested: preferredProvider,
+    instance: instance as Record<string, unknown>,
+  });
+
   const result = await sendWhatsAppMessage({
     supabase,
     professionalId,
     recipient: professional.phone,
     message: messageBody,
     instance,
-    preferredProvider: "evolution",
+    preferredProvider: selectedPreferredProvider,
     details: {
       source: "lis_radar_notification",
       opportunity_id: opportunityId,

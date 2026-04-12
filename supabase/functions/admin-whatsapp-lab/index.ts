@@ -46,6 +46,37 @@ type SerializedError = {
   message: string;
   details: Record<string, unknown>;
 };
+type ProviderKey = "evolution" | "official";
+type WhatsappInstanceRow = {
+  professional_id?: string | null;
+  instance_name?: string | null;
+  meta_phone_id?: string | null;
+  status?: string | null;
+  updated_at?: string | null;
+  created_at?: string | null;
+};
+type ProviderAvailability = {
+  evolutionConfigured: boolean;
+  officialConfigured: boolean;
+  connectedProviders: ProviderKey[];
+  selectableProviders: ProviderKey[];
+  evolutionStatus: string;
+  officialStatus: string;
+  providerReadiness: {
+    evolution: {
+      available: boolean;
+      reason: string | null;
+      instanceName: string | null;
+      channelStatus: string;
+    };
+    official: {
+      available: boolean;
+      reason: string | null;
+      metaPhoneId: string | null;
+      channelStatus: string;
+    };
+  };
+};
 
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -69,6 +100,22 @@ function normalizePhone(phone: string | null | undefined) {
   if (digits.startsWith("55") && digits.length >= 12 && digits.length <= 13) return digits;
   if (digits.length >= 10 && digits.length <= 11) return `55${digits}`;
   return digits;
+}
+
+function getOfficialTokenConfigured() {
+  return Boolean(
+    (Deno.env.get("WHATSAPP_CLOUD_API_TOKEN") || "").trim() ||
+    (Deno.env.get("META_WHATSAPP_TOKEN") || "").trim() ||
+    (Deno.env.get("WHATSAPP_OFFICIAL_TOKEN") || "").trim(),
+  );
+}
+
+function getEvolutionConfigured() {
+  return Boolean((Deno.env.get("EVOLUTION_API_URL") || "").trim() && (Deno.env.get("EVOLUTION_API_KEY") || "").trim());
+}
+
+function normalizePreferredProvider(value: unknown): "official" | "evolution" {
+  return asString(value).toLowerCase() === "official" ? "official" : "evolution";
 }
 
 function toSerializedError(error: unknown, fallbackMessage = "Unexpected error"): SerializedError {
@@ -212,20 +259,81 @@ async function resolveProfessional(
   return data;
 }
 
-async function resolveConnectedInstance(
+async function resolveLatestInstance(
   supabase: SupabaseClient,
   professionalId: string,
 ) {
   const { data, error } = await supabase
     .from("whatsapp_instances")
-    .select("professional_id, instance_name, meta_phone_id, status, updated_at")
+    .select("professional_id, instance_name, meta_phone_id, status, updated_at, created_at")
     .eq("professional_id", professionalId)
-    .eq("status", "connected")
     .order("updated_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+    .order("created_at", { ascending: false })
+    .limit(20);
   if (error) throw error;
-  return data;
+
+  const rows = (data || []) as WhatsappInstanceRow[];
+  if (rows.length === 0) return null;
+
+  const connected = rows.find((row) => String(row.status || "").toLowerCase() === "connected");
+  return connected || rows.find((row) => !!asString(row.instance_name) || !!asString(row.meta_phone_id)) || rows[0];
+}
+
+function buildProviderAvailability(instance: WhatsappInstanceRow | null): ProviderAvailability {
+  const evolutionConfigured = getEvolutionConfigured();
+  const officialConfigured = getOfficialTokenConfigured();
+  const instanceStatus = asString(instance?.status).toLowerCase();
+  const evolutionReady = Boolean(
+    evolutionConfigured &&
+      asString(instance?.instance_name) &&
+      instanceStatus === "connected",
+  );
+  const officialReady = Boolean(
+    officialConfigured &&
+      asString(instance?.meta_phone_id),
+  );
+
+  const evolutionReason = !evolutionConfigured
+    ? "evolution_env_missing"
+    : !asString(instance?.instance_name)
+    ? "instance_name_missing"
+    : instanceStatus !== "connected"
+    ? "instance_not_connected"
+    : null;
+  const officialReason = !officialConfigured
+    ? "official_env_missing"
+    : !asString(instance?.meta_phone_id)
+    ? "meta_phone_id_missing"
+    : null;
+
+  return {
+    evolutionConfigured,
+    officialConfigured,
+    connectedProviders: [
+      ...(evolutionReady ? ["evolution" as const] : []),
+      ...(officialReady ? ["official" as const] : []),
+    ],
+    selectableProviders: [
+      ...(evolutionReady ? ["evolution" as const] : []),
+      ...(officialReady ? ["official" as const] : []),
+    ],
+    evolutionStatus: evolutionReady ? "ready" : evolutionReason || "unavailable",
+    officialStatus: officialReady ? "ready" : officialReason || "unavailable",
+    providerReadiness: {
+      evolution: {
+        available: evolutionReady,
+        reason: evolutionReason,
+        instanceName: asString(instance?.instance_name) || null,
+        channelStatus: evolutionReady ? "connected" : (instanceStatus || "disconnected"),
+      },
+      official: {
+        available: officialReady,
+        reason: officialReason,
+        metaPhoneId: asString(instance?.meta_phone_id) || null,
+        channelStatus: officialReady ? "configured" : "not_configured",
+      },
+    },
+  };
 }
 
 function randomMessageId(prefix: string) {
@@ -457,24 +565,21 @@ async function getContextData(
     return acc;
   }, {} as Record<string, number>);
 
-  const evolutionConfigured = Boolean((Deno.env.get("EVOLUTION_API_URL") || "").trim() && (Deno.env.get("EVOLUTION_API_KEY") || "").trim());
-  const officialConfigured = Boolean(
-    (Deno.env.get("WHATSAPP_CLOUD_API_TOKEN") || "").trim() ||
-    (Deno.env.get("META_WHATSAPP_TOKEN") || "").trim() ||
-    (Deno.env.get("WHATSAPP_OFFICIAL_TOKEN") || "").trim(),
-  );
-
   const connectedInstance = instances.find((inst) => String(inst.status || "") === "connected") || null;
-  const connectedProviders: string[] = [];
-  if (connectedInstance?.instance_name && evolutionConfigured) connectedProviders.push("evolution");
-  if (connectedInstance?.meta_phone_id && officialConfigured) connectedProviders.push("official");
+  const primaryInstance = (
+    connectedInstance ||
+    instances.find((inst) => asString(inst.instance_name) || asString(inst.meta_phone_id)) ||
+    instances[0] ||
+    null
+  ) as WhatsappInstanceRow | null;
+  const providerAvailability = buildProviderAvailability(primaryInstance);
 
   console.log("admin-whatsapp-lab get-context done", {
     requestId: requestId || null,
     professionalId: selectedProfessionalId,
     campaignsCount: campaignIds.length,
     warningsCount: warnings.length,
-    providers: connectedProviders,
+    providers: providerAvailability.connectedProviders,
   });
 
   return {
@@ -484,11 +589,8 @@ async function getContextData(
       professional,
       instances,
       connectedInstance,
-      providerAvailability: {
-        evolutionConfigured,
-        officialConfigured,
-        connectedProviders,
-      },
+      primaryInstance,
+      providerAvailability,
       campaignDashboard: campaignDashboardRes,
       opportunities,
       notifications,
@@ -590,13 +692,21 @@ serve(async (req) => {
         const destinationPhone = normalizePhone(destinationRaw);
         if (!destinationPhone) return jsonResponse({ success: false, error: "Destination phone is invalid" }, 400);
 
-        const instance = await resolveConnectedInstance(supabase, professionalId);
+        const instance = await resolveLatestInstance(supabase, professionalId);
         if (!instance) {
-          return jsonResponse({ success: false, error: "No connected WhatsApp instance for this professional" }, 400);
+          return jsonResponse({ success: false, error: "No WhatsApp instance found for this professional" }, 400);
         }
 
-        const preferredProviderRaw = asString(parsedBody.data.preferredProvider).toLowerCase();
-        const preferredProvider = preferredProviderRaw === "official" ? "official" : "evolution";
+        const preferredProvider = normalizePreferredProvider(parsedBody.data.preferredProvider);
+        const providerAvailability = buildProviderAvailability(instance);
+        if (!providerAvailability.selectableProviders.includes(preferredProvider)) {
+          return jsonResponse({
+            success: false,
+            error: `Preferred provider '${preferredProvider}' is not available for this professional`,
+            providerAvailability,
+          }, 400);
+        }
+
         const sendResult = await sendWhatsAppMessage({
           supabase,
           professionalId,
@@ -629,6 +739,7 @@ serve(async (req) => {
         });
 
         const autoNotifyTop = Math.max(0, Math.min(asNumber(parsedBody.data.autoNotifyTop, 0), 5));
+        const preferredProvider = normalizePreferredProvider(parsedBody.data.preferredProvider);
         const notifications: Array<Record<string, unknown>> = [];
         if (autoNotifyTop > 0) {
           for (const opportunity of opportunities.slice(0, autoNotifyTop)) {
@@ -636,6 +747,7 @@ serve(async (req) => {
               supabase,
               professionalId,
               opportunityId: String(opportunity.id),
+              preferredProvider,
             });
             notifications.push({ opportunityId: opportunity.id, ...result });
           }
@@ -652,10 +764,12 @@ serve(async (req) => {
       case "lis-notify-opportunity": {
         const opportunityId = asString(parsedBody.data.opportunityId);
         if (!opportunityId) return jsonResponse({ success: false, error: "opportunityId is required" }, 400);
+        const preferredProvider = normalizePreferredProvider(parsedBody.data.preferredProvider);
         const result = await notifyProfessionalAboutOpportunity({
           supabase,
           professionalId,
           opportunityId,
+          preferredProvider,
         });
         return jsonResponse({ success: true, result });
       }
@@ -701,6 +815,7 @@ serve(async (req) => {
             sendConfigJson: {
               suggestedSendTime: opportunity.suggested_send_time,
               source: "admin_whatsapp_lab",
+              preferredProvider: normalizePreferredProvider(parsedBody.data.preferredProvider),
             },
             scheduledAt: null,
             createdBy: auth.userId,
@@ -766,7 +881,10 @@ serve(async (req) => {
           messageBody,
           ctaType: asString(parsedBody.data.ctaType || "none"),
           ctaPayloadJson: (parsedBody.data.ctaPayloadJson as Record<string, unknown>) || {},
-          sendConfigJson: (parsedBody.data.sendConfigJson as Record<string, unknown>) || {},
+          sendConfigJson: {
+            ...((parsedBody.data.sendConfigJson as Record<string, unknown>) || {}),
+            preferredProvider: normalizePreferredProvider(parsedBody.data.preferredProvider),
+          },
           scheduledAt: asString(parsedBody.data.scheduledAt) || null,
           createdBy: auth.userId,
         });
@@ -1127,6 +1245,7 @@ serve(async (req) => {
               supabase,
               professionalId,
               opportunityId: firstOpportunityId,
+              preferredProvider: normalizePreferredProvider(parsedBody.data.preferredProvider),
             });
           });
         }
@@ -1149,6 +1268,7 @@ serve(async (req) => {
             ctaPayloadJson: { url: `${getAppBaseUrl()}/${professional.slug || ""}` },
             sendConfigJson: {
               source: "admin_whatsapp_lab_e2e",
+              preferredProvider: normalizePreferredProvider(parsedBody.data.preferredProvider),
             },
             scheduledAt: null,
             createdBy: auth.userId,

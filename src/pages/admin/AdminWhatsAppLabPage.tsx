@@ -70,10 +70,32 @@ type LabContextResponse = {
       meta_phone_id?: string | null;
       status?: string | null;
     } | null;
+    primaryInstance?: {
+      instance_name?: string | null;
+      meta_phone_id?: string | null;
+      status?: string | null;
+    } | null;
     providerAvailability: {
       evolutionConfigured: boolean;
       officialConfigured: boolean;
       connectedProviders: string[];
+      selectableProviders: Array<"evolution" | "official">;
+      evolutionStatus: string;
+      officialStatus: string;
+      providerReadiness: {
+        evolution: {
+          available: boolean;
+          reason: string | null;
+          instanceName: string | null;
+          channelStatus: string;
+        };
+        official: {
+          available: boolean;
+          reason: string | null;
+          metaPhoneId: string | null;
+          channelStatus: string;
+        };
+      };
     };
     campaignDashboard: {
       campaigns: Array<{
@@ -311,10 +333,10 @@ const AdminWhatsAppLabPage = () => {
 
   const providerOptions = useMemo(() => {
     const options: Array<"evolution" | "official"> = [];
-    if (context?.providerAvailability?.evolutionConfigured) options.push("evolution");
-    if (context?.providerAvailability?.officialConfigured) options.push("official");
+    if (context?.providerAvailability?.selectableProviders?.includes("evolution")) options.push("evolution");
+    if (context?.providerAvailability?.selectableProviders?.includes("official")) options.push("official");
     return options;
-  }, [context?.providerAvailability]);
+  }, [context?.providerAvailability?.selectableProviders]);
 
   useEffect(() => {
     if (!providerOptions.includes(preferredProvider) && providerOptions[0]) {
@@ -493,7 +515,7 @@ const AdminWhatsAppLabPage = () => {
                 </div>
                 <div className="rounded-lg border p-3">
                   <p className="text-xs text-muted-foreground">Canal conectado</p>
-                  <p className="font-medium">{context.connectedInstance?.instance_name || "Sem instância conectada"}</p>
+                  <p className="font-medium">{context.primaryInstance?.instance_name || context.connectedInstance?.instance_name || "Sem instância"}</p>
                   <div className="flex flex-wrap gap-1 mt-1">
                     {(context.providerAvailability.connectedProviders || []).map((provider) => (
                       <Badge key={provider} variant="secondary">{provider}</Badge>
@@ -503,12 +525,12 @@ const AdminWhatsAppLabPage = () => {
                 <div className="rounded-lg border p-3">
                   <p className="text-xs text-muted-foreground">Telefone profissional</p>
                   <p className="font-medium">{context.professional.phone || "-"}</p>
-                  <p className="text-xs text-muted-foreground">meta_phone_id: {context.connectedInstance?.meta_phone_id || "-"}</p>
+                  <p className="text-xs text-muted-foreground">meta_phone_id: {context.providerAvailability.providerReadiness.official.metaPhoneId || "-"}</p>
                 </div>
                 <div className="rounded-lg border p-3">
-                  <p className="text-xs text-muted-foreground">Jobs</p>
-                  <p className="font-medium">pending: {context.dispatchJobsSummary?.pending || 0}</p>
-                  <p className="text-xs text-muted-foreground">failed: {context.dispatchJobsSummary?.failed || 0}</p>
+                  <p className="text-xs text-muted-foreground">Status providers</p>
+                  <p className="text-xs">Evolution: <span className="font-medium">{context.providerAvailability.evolutionStatus}</span></p>
+                  <p className="text-xs">Official: <span className="font-medium">{context.providerAvailability.officialStatus}</span></p>
                 </div>
               </div>
             ) : null}
@@ -533,12 +555,12 @@ const AdminWhatsAppLabPage = () => {
                   <div>
                     <p className="text-xs text-muted-foreground">instância</p>
                     <div className="flex items-center gap-2">
-                      <p className="font-medium">{context.connectedInstance?.instance_name || "-"}</p>
+                      <p className="font-medium">{context.primaryInstance?.instance_name || context.connectedInstance?.instance_name || "-"}</p>
                       <Button
                         size="icon"
                         variant="ghost"
                         className="h-6 w-6"
-                        onClick={() => copyToClipboard("instance_name", context.connectedInstance?.instance_name || null)}
+                        onClick={() => copyToClipboard("instance_name", context.primaryInstance?.instance_name || context.connectedInstance?.instance_name || null)}
                       >
                         <Copy className="h-3.5 w-3.5" />
                       </Button>
@@ -560,8 +582,8 @@ const AdminWhatsAppLabPage = () => {
                   </div>
                   <div>
                     <p className="text-xs text-muted-foreground">status do canal</p>
-                    <Badge variant={context.connectedInstance?.status === "connected" ? "default" : "destructive"}>
-                      {context.connectedInstance?.status || "disconnected"}
+                    <Badge variant={context.primaryInstance?.status === "connected" ? "default" : "destructive"}>
+                      {context.primaryInstance?.status || context.connectedInstance?.status || "disconnected"}
                     </Badge>
                   </div>
                 </div>
@@ -648,7 +670,10 @@ const AdminWhatsAppLabPage = () => {
                 </Select>
                 <Button
                   disabled={disabled || actionLoading !== null}
-                  onClick={() => runAction("lis-generate-opportunities", { autoNotifyTop: 0 }, { successMessage: "Oportunidades geradas." })}
+                  onClick={() => runAction("lis-generate-opportunities", {
+                    autoNotifyTop: 0,
+                    preferredProvider,
+                  }, { successMessage: "Oportunidades geradas." })}
                 >
                   {actionLoading === "lis-generate-opportunities" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
                   Gerar oportunidades agora
@@ -672,14 +697,21 @@ const AdminWhatsAppLabPage = () => {
                 <Button
                   variant="outline"
                   disabled={disabled || !selectedOpportunityId || actionLoading !== null}
-                  onClick={() => runAction("lis-notify-opportunity", { opportunityId: selectedOpportunityId }, { successMessage: "Notificação da Lis enviada." })}
+                  onClick={() => runAction("lis-notify-opportunity", {
+                    opportunityId: selectedOpportunityId,
+                    preferredProvider,
+                  }, { successMessage: "Notificação da Lis enviada." })}
                 >
                   Notificar profissional
                 </Button>
                 <Button
                   variant="outline"
                   disabled={disabled || !selectedOpportunityId || actionLoading !== null}
-                  onClick={() => runAction("lis-opportunity-action", { opportunityId: selectedOpportunityId, kind: "generate_campaign" }, { successMessage: "Draft gerado da oportunidade." })}
+                  onClick={() => runAction("lis-opportunity-action", {
+                    opportunityId: selectedOpportunityId,
+                    kind: "generate_campaign",
+                    preferredProvider,
+                  }, { successMessage: "Draft gerado da oportunidade." })}
                 >
                   Gerar campanha
                 </Button>
@@ -732,6 +764,7 @@ const AdminWhatsAppLabPage = () => {
                     messageBody: draftMessage,
                     ctaType: "link",
                     ctaPayloadJson: { url: `https://gende.io/${context?.professional.slug || ""}` },
+                    preferredProvider,
                   }, { successMessage: "Draft criado com sucesso." })}
                 >
                   Criar draft
@@ -1069,6 +1102,7 @@ const AdminWhatsAppLabPage = () => {
                       batchSize: Number(workerBatchSize),
                       maxBatches: Number(workerMaxBatches),
                       messageBody: draftMessage,
+                      preferredProvider,
                     }, { successMessage: "Fluxo E2E executado." })}
                   >
                     {actionLoading === "e2e-run-flow" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <PlayCircle className="mr-2 h-4 w-4" />}
