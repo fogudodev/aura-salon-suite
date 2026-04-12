@@ -12,6 +12,82 @@ import type {
 
 const bootstrapKey = (professionalId?: string) => ["whatsapp-campaigns", "bootstrap", professionalId];
 
+type CampaignInvokeError = Error & {
+  statusCode?: number;
+  details?: unknown;
+};
+
+function toCampaignInvokeError(input: unknown, fallbackMessage: string): CampaignInvokeError {
+  let message = fallbackMessage;
+  let statusCode: number | undefined;
+  let details: unknown;
+
+  if (input instanceof Error && input.message) {
+    message = input.message;
+  }
+
+  if (input && typeof input === "object") {
+    const obj = input as Record<string, unknown>;
+    if (typeof obj.message === "string" && obj.message.trim()) {
+      message = obj.message;
+    }
+    if (typeof obj.status === "number") {
+      statusCode = obj.status;
+    }
+    if (obj.context && typeof obj.context === "object") {
+      const context = obj.context as Record<string, unknown>;
+      if (typeof context.status === "number") {
+        statusCode = context.status;
+      }
+    }
+    details = obj;
+  }
+
+  if (!message || message === "[object Object]") {
+    message = fallbackMessage;
+  }
+
+  const error = new Error(message) as CampaignInvokeError;
+  error.statusCode = statusCode;
+  error.details = details;
+  return error;
+}
+
+function throwIfFunctionDataError(data: unknown, fallbackMessage: string) {
+  if (!data || typeof data !== "object") return;
+  const record = data as Record<string, unknown>;
+  const rawError = record.error;
+  if (!rawError) return;
+
+  let message = fallbackMessage;
+  if (typeof rawError === "string" && rawError.trim()) {
+    message = rawError;
+  } else if (rawError && typeof rawError === "object") {
+    const nested = rawError as Record<string, unknown>;
+    if (typeof nested.message === "string" && nested.message.trim()) {
+      message = nested.message;
+    }
+  }
+
+  const error = new Error(message) as CampaignInvokeError;
+  const details = record.details;
+  if (details && typeof details === "object") {
+    const status = (details as Record<string, unknown>).status;
+    if (typeof status === "number") error.statusCode = status;
+    error.details = details;
+  }
+  throw error;
+}
+
+function shouldRetryCampaignQuery(failureCount: number, error: unknown) {
+  const statusCode = typeof (error as CampaignInvokeError)?.statusCode === "number"
+    ? (error as CampaignInvokeError).statusCode
+    : undefined;
+  if (statusCode === 500) return false;
+  if (statusCode && statusCode >= 400) return false;
+  return failureCount < 1;
+}
+
 export const useWhatsAppCampaignsDashboard = () => {
   const { data: professional } = useProfessional();
 
@@ -21,11 +97,14 @@ export const useWhatsAppCampaignsDashboard = () => {
       const { data, error } = await api.functions.invoke("whatsapp-campaigns", {
         body: { action: "get-bootstrap" },
       });
-      if (error) throw error;
-      if (data?.error) throw new Error(data.error);
+      if (error) throw toCampaignInvokeError(error, "Falha ao carregar bootstrap de campanhas");
+      throwIfFunctionDataError(data, "Falha ao carregar bootstrap de campanhas");
       return data as CampaignDashboardData;
     },
     enabled: !!professional?.id,
+    retry: shouldRetryCampaignQuery,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
   });
 };
 
@@ -61,11 +140,14 @@ export const useWhatsAppCampaignBuilderPreview = (params: {
           ctaPayload: params.ctaPayload,
         },
       });
-      if (error) throw error;
-      if (data?.error) throw new Error(data.error);
+      if (error) throw toCampaignInvokeError(error, "Falha ao gerar preview da campanha");
+      throwIfFunctionDataError(data, "Falha ao gerar preview da campanha");
       return data;
     },
     enabled: !!professional?.id && params.enabled,
+    retry: shouldRetryCampaignQuery,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
   });
 };
 
@@ -118,11 +200,14 @@ export const useWhatsAppCampaignDetails = (campaignId?: string | null) => {
       const { data, error } = await api.functions.invoke("whatsapp-campaigns", {
         body: { action: "get-campaign", campaignId },
       });
-      if (error) throw error;
-      if (data?.error) throw new Error(data.error);
+      if (error) throw toCampaignInvokeError(error, "Falha ao carregar detalhes da campanha");
+      throwIfFunctionDataError(data, "Falha ao carregar detalhes da campanha");
       return data as CampaignDetailData;
     },
     enabled: !!professional?.id && !!campaignId,
+    retry: shouldRetryCampaignQuery,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
   });
 };
 
@@ -185,11 +270,14 @@ export const useCampaignTemplates = () => {
       const { data, error } = await api.functions.invoke("whatsapp-campaigns", {
         body: { action: "list-templates" },
       });
-      if (error) throw error;
-      if (data?.error) throw new Error(data.error);
+      if (error) throw toCampaignInvokeError(error, "Falha ao listar templates");
+      throwIfFunctionDataError(data, "Falha ao listar templates");
       return (data?.templates || []) as CampaignTemplate[];
     },
     enabled: !!professional?.id,
+    retry: shouldRetryCampaignQuery,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
   });
 };
 
@@ -281,11 +369,14 @@ export const useCampaignLimits = () => {
       const { data, error } = await api.functions.invoke("whatsapp-campaigns", {
         body: { action: "get-limits" },
       });
-      if (error) throw error;
-      if (data?.error) throw new Error(data.error);
+      if (error) throw toCampaignInvokeError(error, "Falha ao carregar limites de campanhas");
+      throwIfFunctionDataError(data, "Falha ao carregar limites de campanhas");
       return data as CampaignDashboardData["limits"];
     },
     enabled: !!professional?.id,
+    retry: shouldRetryCampaignQuery,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
   });
 };
 
@@ -297,11 +388,14 @@ export const useLisOpportunities = () => {
       const { data, error } = await api.functions.invoke("whatsapp-campaigns", {
         body: { action: "list-opportunities" },
       });
-      if (error) throw error;
-      if (data?.error) throw new Error(data.error);
+      if (error) throw toCampaignInvokeError(error, "Falha ao listar oportunidades da Lis");
+      throwIfFunctionDataError(data, "Falha ao listar oportunidades da Lis");
       return (data?.opportunities || []) as LisOpportunity[];
     },
     enabled: !!professional?.id,
+    retry: shouldRetryCampaignQuery,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
   });
 };
 

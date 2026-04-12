@@ -64,6 +64,17 @@ const automationPresets = [
 
 const money = (value: number) => `R$ ${Number(value || 0).toFixed(0)}`;
 const dt = (value?: string | null, pattern = "dd/MM HH:mm") => (value ? format(new Date(value), pattern, { locale: ptBR }) : "nunca");
+const readableCampaignError = (error: unknown) => {
+  if (!error) return "Erro operacional inesperado.";
+  if (error instanceof Error && error.message) return error.message;
+  if (typeof error === "string" && error.trim()) return error;
+  if (typeof error === "object") {
+    const record = error as Record<string, unknown>;
+    if (typeof record.message === "string" && record.message.trim()) return record.message;
+    if (typeof record.error === "string" && record.error.trim()) return record.error;
+  }
+  return "Erro operacional inesperado.";
+};
 
 const mapCampaignToForm = (campaign: CampaignSummary): CampaignWizardForm => ({
   id: campaign.id,
@@ -135,11 +146,12 @@ const Campaigns = () => {
   }
 
   if (dashboard.error) {
+    const errorMessage = readableCampaignError(dashboard.error);
     return (
       <DashboardLayout title="Campanhas Inteligentes" subtitle="Nao foi possivel carregar o modulo.">
         <div className="rounded-[28px] border border-[#eadfce] bg-white p-8 text-center">
           <p className="text-lg font-semibold text-[#3d2c1e]">Erro ao carregar campanhas.</p>
-          <p className="mt-2 text-sm text-[#6b5a4a]">Verifique a conexao e tente novamente.</p>
+          <p className="mt-2 text-sm text-[#6b5a4a]">{errorMessage}</p>
           <Button variant="outline" className="mt-5 rounded-2xl border-[#eadfce]" onClick={() => dashboard.refetch()}>Recarregar</Button>
         </div>
       </DashboardLayout>

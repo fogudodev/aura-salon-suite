@@ -506,7 +506,7 @@ export async function listCampaigns(
     .from("whatsapp_campaigns")
     .select(`
       *,
-      source_opportunity:lis_campaign_opportunities(id, title, status),
+      source_opportunity:lis_campaign_opportunities!whatsapp_campaigns_source_opportunity_id_fkey(id, title, status),
       template:whatsapp_campaign_templates(id, name)
     `)
     .eq("professional_id", professionalId)
@@ -550,7 +550,7 @@ export async function getCampaignDetails(
       .from("whatsapp_campaigns")
       .select(`
         *,
-        source_opportunity:lis_campaign_opportunities(*),
+        source_opportunity:lis_campaign_opportunities!whatsapp_campaigns_source_opportunity_id_fkey(*),
         template:whatsapp_campaign_templates(id, name, body)
       `)
       .eq("professional_id", professionalId)

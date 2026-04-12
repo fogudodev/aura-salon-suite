@@ -41,11 +41,79 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
+type JsonObject = Record<string, unknown>;
+type ParsedBodyResult = {
+  ok: boolean;
+  data: JsonObject;
+  error?: string;
+};
+type SerializedError = {
+  message: string;
+  details: Record<string, unknown>;
+};
+
 function json(data: unknown, status = 200) {
   return new Response(JSON.stringify(data), {
     status,
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
+}
+
+function asString(value: unknown) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+async function parseJsonBody(req: Request): Promise<ParsedBodyResult> {
+  try {
+    const raw = await req.text();
+    if (!raw.trim()) return { ok: true, data: {} };
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return { ok: false, data: {}, error: "Request body must be a JSON object" };
+    }
+    return { ok: true, data: parsed as JsonObject };
+  } catch {
+    return { ok: false, data: {}, error: "Invalid JSON body" };
+  }
+}
+
+function toSerializedError(error: unknown, fallbackMessage = "Unexpected error"): SerializedError {
+  if (error instanceof Error) {
+    return {
+      message: error.message || fallbackMessage,
+      details: {
+        name: error.name,
+        stack: (error.stack || "").split("\n").slice(0, 6).join("\n"),
+      },
+    };
+  }
+
+  if (error && typeof error === "object") {
+    const obj = error as Record<string, unknown>;
+    const nested = obj.error && typeof obj.error === "object" ? obj.error as Record<string, unknown> : null;
+    const message = asString(obj.message) ||
+      asString(obj.error_description) ||
+      asString(obj.details) ||
+      asString(nested?.message) ||
+      fallbackMessage;
+
+    return {
+      message: message === "[object Object]" ? fallbackMessage : message,
+      details: {
+        code: obj.code || null,
+        hint: obj.hint || null,
+        details: obj.details || null,
+        status: obj.status || null,
+        raw: obj,
+      },
+    };
+  }
+
+  const value = String(error || "");
+  return {
+    message: value && value !== "[object Object]" ? value : fallbackMessage,
+    details: { raw: value || null },
+  };
 }
 
 async function triggerWorker(params: {
@@ -74,8 +142,22 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  const requestId = crypto.randomUUID().replaceAll("-", "").slice(0, 12);
+  let action = "";
+  let stage = "request_start";
+
+  console.log("whatsapp-campaigns request", {
+    requestId,
+    method: req.method,
+    path: new URL(req.url).pathname,
+  });
+
   try {
+    stage = "auth_resolve_professional";
     const { adminClient, userId, professionalId } = await resolveProfessionalFromRequest(req);
+    console.log("whatsapp-campaigns auth ok", { requestId, userId, professionalId });
+
+    stage = "feature_gate_check";
     await assertFeatureEnabledForProfessional({
       supabase: adminClient,
       professionalId,
@@ -84,14 +166,27 @@ serve(async (req) => {
       defaultEnabledWhenFlagMissing: false,
     });
 
-    const body = await req.json().catch(() => null);
-    if (!body || typeof body !== "object") {
-      return json({ error: "Invalid request body" }, 400);
+    stage = "parse_body";
+    const parsedBody = await parseJsonBody(req);
+    if (!parsedBody.ok) {
+      return json({ error: parsedBody.error }, 400);
     }
-    const action = body.action as string;
+    const body = parsedBody.data;
+    action = asString(body.action);
+    if (!action) {
+      return json({ error: "action is required" }, 400);
+    }
 
+    console.log("whatsapp-campaigns action", {
+      requestId,
+      action,
+      professionalId,
+    });
+
+    stage = `action_${action}`;
     switch (action) {
       case "get-bootstrap": {
+        console.log("whatsapp-campaigns query", { requestId, stage, query: "getCampaignDashboardSnapshot" });
         await syncCampaignAttributionsForProfessional({
           supabase: adminClient,
           professionalId,
@@ -106,6 +201,7 @@ serve(async (req) => {
       }
 
       case "get-limits": {
+        console.log("whatsapp-campaigns query", { requestId, stage, query: "getCampaignLimits" });
         const limits = await getCampaignLimits(adminClient, professionalId);
         return json(limits);
       }
@@ -203,6 +299,7 @@ serve(async (req) => {
       }
 
       case "get-campaign": {
+        console.log("whatsapp-campaigns query", { requestId, stage, query: "getCampaignDetails", campaignId: body.campaignId });
         await syncCampaignAttributionsForCampaign({
           supabase: adminClient,
           professionalId,
@@ -247,6 +344,7 @@ serve(async (req) => {
       }
 
       case "list-opportunities": {
+        console.log("whatsapp-campaigns query", { requestId, stage, query: "list lis_campaign_opportunities" });
         const { data, error } = await adminClient
           .from("lis_campaign_opportunities")
           .select("*")
@@ -454,9 +552,32 @@ serve(async (req) => {
         code: "feature_disabled",
         feature: error.featureKey,
         reason: error.reason,
+        context: {
+          requestId,
+          action: action || null,
+          stage,
+        },
       }, error.status);
     }
-    console.error("whatsapp-campaigns error:", error);
-    return json({ error: error instanceof Error ? error.message : String(error) }, 500);
+    const serialized = toSerializedError(error, "whatsapp-campaigns failed");
+    const unauthorized =
+      serialized.message.toLowerCase() === "unauthorized" ||
+      (serialized.details.code && String(serialized.details.code) === "401");
+    console.error("whatsapp-campaigns error:", {
+      requestId,
+      action: action || "(unknown)",
+      stage,
+      message: serialized.message,
+      details: serialized.details,
+    });
+    return json({
+      error: serialized.message,
+      details: {
+        requestId,
+        action: action || "(unknown)",
+        stage,
+        ...serialized.details,
+      },
+    }, unauthorized ? 401 : 500);
   }
 });
