@@ -70,6 +70,7 @@ import AdminFeatureFlags from "./pages/admin/AdminFeatureFlags";
 import AdminBookings from "./pages/admin/AdminBookings";
 import AdminWhatsAppPage from "./pages/admin/AdminWhatsAppPage";
 import AdminWhatsAppLogsPage from "./pages/admin/AdminWhatsAppLogsPage";
+import AdminWhatsAppLabPage from "./pages/admin/AdminWhatsAppLabPage";
 import AdminPlanLimits from "./pages/admin/AdminPlanLimits";
 import AdminProfessionalLimits from "./pages/admin/AdminProfessionalLimits";
 import AdminMessageUsagePage from "./pages/admin/AdminMessageUsagePage";
@@ -146,6 +147,7 @@ const AppContent = () => (
             <Route path="/admin/bookings" element={<AdminRoute><AdminBookings /></AdminRoute>} />
             <Route path="/admin/whatsapp" element={<AdminRoute><AdminWhatsAppPage /></AdminRoute>} />
             <Route path="/admin/whatsapp-logs" element={<AdminRoute><AdminWhatsAppLogsPage /></AdminRoute>} />
+            <Route path="/admin/whatsapp-lab" element={<AdminRoute><AdminWhatsAppLabPage /></AdminRoute>} />
             <Route path="/admin/plan-limits" element={<AdminRoute><AdminPlanLimits /></AdminRoute>} />
             <Route path="/admin/professional-limits" element={<AdminRoute><AdminProfessionalLimits /></AdminRoute>} />
             <Route path="/admin/message-usage" element={<AdminRoute><AdminMessageUsagePage /></AdminRoute>} />

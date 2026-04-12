@@ -23,6 +23,7 @@ import {
   Wallet,
   Star,
   Flag,
+  TestTube2,
 } from "lucide-react";
 import logo from "@/assets/logo-circle.png";
 
@@ -35,6 +36,7 @@ const allAdminNavItems = [
   { icon: Settings, label: "Funcionalidades", path: "/admin/features", supportAccess: true },
   { icon: CalendarDays, label: "Agendamentos", path: "/admin/bookings", supportAccess: true },
   { icon: MessageSquare, label: "WhatsApp", path: "/admin/whatsapp", supportAccess: true },
+  { icon: TestTube2, label: "WhatsApp Lab", path: "/admin/whatsapp-lab", supportAccess: false },
   { icon: Sliders, label: "Limites de Plano", path: "/admin/plan-limits", supportAccess: false },
   { icon: UserCog, label: "Limites Individuais", path: "/admin/professional-limits", supportAccess: true },
   { icon: BarChart3, label: "Uso de Mensagens", path: "/admin/message-usage", supportAccess: true },
