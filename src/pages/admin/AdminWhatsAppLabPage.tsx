@@ -137,6 +137,9 @@ type LabContextResponse = {
     }>;
     lastWhatsappLog: Record<string, unknown> | null;
   } | null;
+  diagnostics?: {
+    warnings?: string[];
+  };
 };
 
 function JsonViewer({ data }: { data: unknown }) {
@@ -161,6 +164,50 @@ function toOperationalErrorMessage(input: unknown) {
     return "Sessão inválida para ação de admin. Refaça login com conta admin master.";
   }
   return raw;
+}
+
+async function resolveFunctionInvokeError(input: unknown) {
+  let message = toOperationalErrorMessage(input);
+  const details: Record<string, unknown> = {};
+
+  if (input && typeof input === "object") {
+    const errorObj = input as Record<string, unknown>;
+    if (typeof errorObj.message === "string" && errorObj.message.trim()) {
+      message = errorObj.message;
+    }
+
+    const context = errorObj.context as { json?: () => Promise<unknown>; text?: () => Promise<string> } | undefined;
+    if (context?.json) {
+      try {
+        const body = await context.json();
+        if (body && typeof body === "object") {
+          const bodyObj = body as Record<string, unknown>;
+          if (typeof bodyObj.error === "string" && bodyObj.error.trim()) {
+            message = bodyObj.error;
+          } else if (bodyObj.error && typeof bodyObj.error === "object") {
+            const nested = bodyObj.error as Record<string, unknown>;
+            if (typeof nested.message === "string" && nested.message.trim()) {
+              message = nested.message;
+            }
+          }
+          if (bodyObj.details && typeof bodyObj.details === "object") {
+            Object.assign(details, bodyObj.details as Record<string, unknown>);
+          }
+        }
+      } catch {
+        // ignore body parse failure
+      }
+    } else if (context?.text) {
+      try {
+        const raw = await context.text();
+        if (raw?.trim()) message = raw.trim();
+      } catch {
+        // ignore fallback parse failure
+      }
+    }
+  }
+
+  return { message, details };
 }
 
 const AdminWhatsAppLabPage = () => {
@@ -206,14 +253,25 @@ const AdminWhatsAppLabPage = () => {
           professionalId: selectedProfessionalId || null,
         },
       });
-      if (error) throw error;
-      if (data?.error) throw new Error(data.error);
+      if (error) {
+        const parsed = await resolveFunctionInvokeError(error);
+        throw new Error(parsed.message);
+      }
+      if (data?.error) {
+        const message = typeof data.error === "string"
+          ? data.error
+          : toOperationalErrorMessage(data.error);
+        throw new Error(message);
+      }
       return data as LabContextResponse;
     },
     staleTime: 10_000,
+    retry: false,
+    refetchOnWindowFocus: false,
   });
 
   const context = contextQuery.data?.context || null;
+  const contextWarnings = useMemo(() => contextQuery.data?.diagnostics?.warnings || [], [contextQuery.data?.diagnostics?.warnings]);
   const professionals = useMemo(() => contextQuery.data?.professionals || [], [contextQuery.data?.professionals]);
   const campaigns = useMemo(() => context?.campaignDashboard?.campaigns || [], [context?.campaignDashboard?.campaigns]);
   const opportunities = useMemo(() => context?.opportunities || [], [context?.opportunities]);
@@ -277,8 +335,16 @@ const AdminWhatsAppLabPage = () => {
         ...payload,
       };
       const { data, error } = await api.functions.invoke("admin-whatsapp-lab", { body });
-      if (error) throw error;
-      if (data?.error) throw new Error(data.error);
+      if (error) {
+        const parsed = await resolveFunctionInvokeError(error);
+        throw new Error(parsed.message);
+      }
+      if (data?.error) {
+        const message = typeof data.error === "string"
+          ? data.error
+          : toOperationalErrorMessage(data.error);
+        throw new Error(message);
+      }
       setLastErrorMessage("");
 
       setLastResponse(data);
@@ -306,7 +372,8 @@ const AdminWhatsAppLabPage = () => {
       }
       return data;
     } catch (err) {
-      const message = toOperationalErrorMessage(err);
+      const parsed = await resolveFunctionInvokeError(err);
+      const message = parsed.message;
       setLastErrorMessage(message);
       toast.error(message);
       setLogs((prev) => [
@@ -505,6 +572,17 @@ const AdminWhatsAppLabPage = () => {
               <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-3">
                 <p className="text-xs text-muted-foreground mb-1">Último erro operacional</p>
                 <p className="text-sm text-destructive font-medium">{lastErrorMessage}</p>
+              </div>
+            ) : null}
+
+            {contextWarnings.length > 0 ? (
+              <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 space-y-1">
+                <p className="text-xs text-muted-foreground">Alertas de diagnóstico do backend</p>
+                {contextWarnings.slice(0, 6).map((warning, index) => (
+                  <p key={`${warning}-${index}`} className="text-xs text-amber-700 dark:text-amber-300">
+                    {warning}
+                  </p>
+                ))}
               </div>
             ) : null}
           </CardContent>

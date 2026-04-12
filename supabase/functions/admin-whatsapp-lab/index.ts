@@ -42,6 +42,10 @@ const corsHeaders = {
 };
 
 type JsonObject = Record<string, unknown>;
+type SerializedError = {
+  message: string;
+  details: Record<string, unknown>;
+};
 
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -67,6 +71,85 @@ function normalizePhone(phone: string | null | undefined) {
   return digits;
 }
 
+function toSerializedError(error: unknown, fallbackMessage = "Unexpected error"): SerializedError {
+  if (error instanceof Error) {
+    return {
+      message: error.message || fallbackMessage,
+      details: {
+        name: error.name,
+        stack: (error.stack || "").split("\n").slice(0, 6).join("\n"),
+      },
+    };
+  }
+
+  if (error && typeof error === "object") {
+    const obj = error as Record<string, unknown>;
+    const nestedError = obj.error;
+
+    const nestedMessage = nestedError && typeof nestedError === "object"
+      ? asString((nestedError as Record<string, unknown>).message)
+      : "";
+
+    const message = asString(obj.message)
+      || asString(obj.error_description)
+      || (typeof nestedError === "string" ? nestedError : "")
+      || nestedMessage
+      || fallbackMessage;
+
+    const details: Record<string, unknown> = {
+      code: obj.code || null,
+      details: obj.details || null,
+      hint: obj.hint || null,
+      status: obj.status || null,
+      statusCode: obj.statusCode || null,
+      raw: obj,
+    };
+
+    return {
+      message: message === "[object Object]" ? fallbackMessage : message,
+      details,
+    };
+  }
+
+  const primitive = String(error || "");
+  return {
+    message: primitive && primitive !== "[object Object]" ? primitive : fallbackMessage,
+    details: { raw: primitive || null },
+  };
+}
+
+function buildErrorResponse(params: {
+  requestId: string;
+  action: string;
+  stage: string;
+  error: unknown;
+  status?: number;
+  prefix?: string;
+}) {
+  const serialized = toSerializedError(params.error);
+  const prefix = params.prefix || "Operation failed";
+  const message = `${prefix}: ${serialized.message}`;
+
+  console.error("admin-whatsapp-lab error", {
+    requestId: params.requestId,
+    action: params.action || "(unknown)",
+    stage: params.stage,
+    message: serialized.message,
+    details: serialized.details,
+  });
+
+  return jsonResponse({
+    success: false,
+    error: message,
+    details: {
+      requestId: params.requestId,
+      action: params.action || "(unknown)",
+      stage: params.stage,
+      ...serialized.details,
+    },
+  }, params.status || 500);
+}
+
 async function parseJsonBody(req: Request): Promise<{ ok: boolean; data: JsonObject; error?: string }> {
   try {
     const raw = await req.text();
@@ -84,7 +167,7 @@ async function parseJsonBody(req: Request): Promise<{ ok: boolean; data: JsonObj
 async function assertAdminMaster(
   req: Request,
   supabaseAdmin: SupabaseClient,
-): Promise<{ ok: true; userId: string } | { ok: false; status: number; error: string }> {
+): Promise<{ ok: true; userId: string } | { ok: false; status: number; error: string; details?: Record<string, unknown> }> {
   const authHeader = req.headers.get("Authorization") || "";
   if (!authHeader.startsWith("Bearer ")) {
     return { ok: false, status: 401, error: "Missing bearer token" };
@@ -95,8 +178,11 @@ async function assertAdminMaster(
 
   const { data: userData, error: userError } = await supabaseAdmin.auth.getUser(token);
   if (userError || !userData.user?.id) {
-    return { ok: false, status: 401, error: "Unauthorized" };
+    const serialized = toSerializedError(userError, "Unauthorized");
+    return { ok: false, status: 401, error: serialized.message, details: serialized.details };
   }
+
+  console.log("admin-whatsapp-lab auth user resolved", { userId: userData.user.id });
 
   const { data: role, error: roleError } = await supabaseAdmin
     .from("user_roles")
@@ -105,8 +191,8 @@ async function assertAdminMaster(
     .eq("role", "admin")
     .maybeSingle();
   if (roleError) {
-    console.error("admin-whatsapp-lab role check error:", roleError);
-    return { ok: false, status: 500, error: "Failed to validate admin role" };
+    const serialized = toSerializedError(roleError, "Failed to validate admin role");
+    return { ok: false, status: 500, error: serialized.message, details: serialized.details };
   }
 
   if (!role) return { ok: false, status: 403, error: "Forbidden: admin master only" };
@@ -149,13 +235,16 @@ function randomMessageId(prefix: string) {
 async function getContextData(
   supabase: SupabaseClient,
   professionalIdInput?: string,
+  requestId?: string,
 ) {
   const { data: professionals, error: professionalsError } = await supabase
     .from("professionals")
     .select("id, name, business_name, phone, slug, created_at")
     .order("created_at", { ascending: false })
     .limit(300);
-  if (professionalsError) throw professionalsError;
+  if (professionalsError) {
+    throw new Error(`Failed to load professionals: ${toSerializedError(professionalsError).message}`);
+  }
 
   const selectedProfessionalId = asString(professionalIdInput) || String(professionals?.[0]?.id || "");
   if (!selectedProfessionalId) {
@@ -163,6 +252,9 @@ async function getContextData(
       professionals: professionals || [],
       selectedProfessionalId: null,
       context: null,
+      diagnostics: {
+        warnings: [],
+      },
     };
   }
 
@@ -170,84 +262,196 @@ async function getContextData(
   if (!professional) {
     throw new Error("Professional not found");
   }
+  console.log("admin-whatsapp-lab get-context start", {
+    requestId: requestId || null,
+    professionalId: selectedProfessionalId,
+  });
 
-  const [campaignIdsRes, instanceRes, campaignDashboardRes, opportunitiesRes, notificationsRes, dispatchJobsRes, attributionsRes, automations, automationRuns, lastWhatsappLogRes] = await Promise.all([
-    supabase
-      .from("whatsapp_campaigns")
-      .select("id")
-      .eq("professional_id", selectedProfessionalId)
-      .limit(50),
-    supabase
-      .from("whatsapp_instances")
-      .select("id, professional_id, instance_name, meta_phone_id, phone_number, status, updated_at, created_at")
-      .eq("professional_id", selectedProfessionalId)
-      .order("updated_at", { ascending: false }),
-    getCampaignDashboardSnapshot(supabase, selectedProfessionalId),
-    supabase
-      .from("lis_campaign_opportunities")
-      .select("*")
-      .eq("professional_id", selectedProfessionalId)
-      .order("created_at", { ascending: false })
-      .limit(30),
-    supabase
-      .from("lis_campaign_notifications")
-      .select("*")
-      .eq("professional_id", selectedProfessionalId)
-      .order("created_at", { ascending: false })
-      .limit(30),
-    supabase
-      .from("whatsapp_campaign_dispatch_jobs")
-      .select("id, status, campaign_id, recipient_id, attempt_count, available_at, locked_at, last_error, created_at")
-      .eq("professional_id", selectedProfessionalId)
-      .order("created_at", { ascending: false })
-      .limit(200),
-    supabase
-      .from("whatsapp_campaign_attributions")
-      .select("*")
-      .eq("professional_id", selectedProfessionalId)
-      .order("created_at", { ascending: false })
-      .limit(40),
-    listCampaignAutomations(supabase, selectedProfessionalId),
-    listCampaignAutomationRuns(supabase, selectedProfessionalId, 40),
-    supabase
-      .from("whatsapp_logs")
-      .select("*")
-      .eq("professional_id", selectedProfessionalId)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle(),
-  ]);
+  const warnings: string[] = [];
+  const withOptional = async <T>(label: string, runner: () => Promise<T>, fallback: T): Promise<T> => {
+    try {
+      return await runner();
+    } catch (error) {
+      const serialized = toSerializedError(error, `Failed to load ${label}`);
+      const warning = `${label}: ${serialized.message}`;
+      warnings.push(warning);
+      console.warn("admin-whatsapp-lab optional context query failed", {
+        requestId: requestId || null,
+        professionalId: selectedProfessionalId,
+        warning,
+        details: serialized.details,
+      });
+      return fallback;
+    }
+  };
 
-  if (campaignIdsRes.error) throw campaignIdsRes.error;
-  if (instanceRes.error) throw instanceRes.error;
-  if (opportunitiesRes.error) throw opportunitiesRes.error;
-  if (notificationsRes.error) throw notificationsRes.error;
-  if (dispatchJobsRes.error) throw dispatchJobsRes.error;
-  if (attributionsRes.error) throw attributionsRes.error;
-  if (lastWhatsappLogRes.error) throw lastWhatsappLogRes.error;
+  const campaignIds = await withOptional(
+    "campaign ids",
+    async () => {
+      const { data, error } = await supabase
+        .from("whatsapp_campaigns")
+        .select("id")
+        .eq("professional_id", selectedProfessionalId)
+        .limit(50);
+      if (error) throw error;
+      return (data || []).map((item) => item.id);
+    },
+    [] as string[],
+  );
 
-  const campaignIds = (campaignIdsRes.data || []).map((item) => item.id);
-  const [eventsRes, recipientsRes] = campaignIds.length > 0
+  const instances = await withOptional(
+    "whatsapp instances",
+    async () => {
+      const { data, error } = await supabase
+        .from("whatsapp_instances")
+        .select("id, professional_id, instance_name, meta_phone_id, phone_number, status, updated_at, created_at")
+        .eq("professional_id", selectedProfessionalId)
+        .order("updated_at", { ascending: false });
+      if (error) throw error;
+      return data || [];
+    },
+    [] as Array<Record<string, unknown>>,
+  );
+
+  const campaignDashboardRes = await withOptional(
+    "campaign dashboard snapshot",
+    async () => await getCampaignDashboardSnapshot(supabase, selectedProfessionalId),
+    {
+      metrics: {},
+      campaigns: [],
+      opportunities: [],
+      opportunitiesAll: [],
+      templates: [],
+      automations: [],
+      automationRuns: [],
+      automationRunLogs: [],
+      comparatives: {},
+      limits: null,
+    } as Record<string, unknown>,
+  );
+
+  const opportunities = await withOptional(
+    "lis opportunities",
+    async () => {
+      const { data, error } = await supabase
+        .from("lis_campaign_opportunities")
+        .select("*")
+        .eq("professional_id", selectedProfessionalId)
+        .order("created_at", { ascending: false })
+        .limit(30);
+      if (error) throw error;
+      return data || [];
+    },
+    [] as Array<Record<string, unknown>>,
+  );
+
+  const notifications = await withOptional(
+    "lis notifications",
+    async () => {
+      const { data, error } = await supabase
+        .from("lis_campaign_notifications")
+        .select("*")
+        .eq("professional_id", selectedProfessionalId)
+        .order("created_at", { ascending: false })
+        .limit(30);
+      if (error) throw error;
+      return data || [];
+    },
+    [] as Array<Record<string, unknown>>,
+  );
+
+  const dispatchJobs = await withOptional(
+    "campaign dispatch jobs",
+    async () => {
+      const { data, error } = await supabase
+        .from("whatsapp_campaign_dispatch_jobs")
+        .select("id, status, campaign_id, recipient_id, attempt_count, available_at, locked_at, last_error, created_at")
+        .eq("professional_id", selectedProfessionalId)
+        .order("created_at", { ascending: false })
+        .limit(200);
+      if (error) throw error;
+      return data || [];
+    },
+    [] as Array<Record<string, unknown>>,
+  );
+
+  const recentAttributions = await withOptional(
+    "campaign attributions",
+    async () => {
+      const { data, error } = await supabase
+        .from("whatsapp_campaign_attributions")
+        .select("*")
+        .eq("professional_id", selectedProfessionalId)
+        .order("created_at", { ascending: false })
+        .limit(40);
+      if (error) throw error;
+      return data || [];
+    },
+    [] as Array<Record<string, unknown>>,
+  );
+
+  const automations = await withOptional(
+    "campaign automations",
+    async () => await listCampaignAutomations(supabase, selectedProfessionalId),
+    [] as Array<Record<string, unknown>>,
+  );
+
+  const automationRuns = await withOptional(
+    "campaign automation runs",
+    async () => await listCampaignAutomationRuns(supabase, selectedProfessionalId, 40),
+    [] as Array<Record<string, unknown>>,
+  );
+
+  const lastWhatsappLog = await withOptional(
+    "last whatsapp log",
+    async () => {
+      const { data, error } = await supabase
+        .from("whatsapp_logs")
+        .select("*")
+        .eq("professional_id", selectedProfessionalId)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (error) throw error;
+      return data || null;
+    },
+    null as Record<string, unknown> | null,
+  );
+
+  const [recentEvents, recentRecipients] = campaignIds.length > 0
     ? await Promise.all([
-      supabase
-        .from("whatsapp_campaign_events")
-        .select("*")
-        .in("campaign_id", campaignIds)
-        .order("created_at", { ascending: false })
-        .limit(80),
-      supabase
-        .from("whatsapp_campaign_recipients")
-        .select("*")
-        .in("campaign_id", campaignIds)
-        .order("created_at", { ascending: false })
-        .limit(80),
+      withOptional(
+        "campaign events",
+        async () => {
+          const { data, error } = await supabase
+            .from("whatsapp_campaign_events")
+            .select("*")
+            .in("campaign_id", campaignIds)
+            .order("created_at", { ascending: false })
+            .limit(80);
+          if (error) throw error;
+          return data || [];
+        },
+        [] as Array<Record<string, unknown>>,
+      ),
+      withOptional(
+        "campaign recipients",
+        async () => {
+          const { data, error } = await supabase
+            .from("whatsapp_campaign_recipients")
+            .select("*")
+            .in("campaign_id", campaignIds)
+            .order("created_at", { ascending: false })
+            .limit(80);
+          if (error) throw error;
+          return data || [];
+        },
+        [] as Array<Record<string, unknown>>,
+      ),
     ])
-    : [{ data: [], error: null }, { data: [], error: null }];
+    : [[], []];
 
-  if (eventsRes.error) throw eventsRes.error;
-  if (recipientsRes.error) throw recipientsRes.error;
-
-  const jobsSummary = (dispatchJobsRes.data || []).reduce((acc, job) => {
+  const jobsSummary = (dispatchJobs || []).reduce((acc, job) => {
     const key = String(job.status || "unknown");
     acc[key] = Number(acc[key] || 0) + 1;
     return acc;
@@ -260,11 +464,18 @@ async function getContextData(
     (Deno.env.get("WHATSAPP_OFFICIAL_TOKEN") || "").trim(),
   );
 
-  const instances = instanceRes.data || [];
   const connectedInstance = instances.find((inst) => String(inst.status || "") === "connected") || null;
   const connectedProviders: string[] = [];
   if (connectedInstance?.instance_name && evolutionConfigured) connectedProviders.push("evolution");
   if (connectedInstance?.meta_phone_id && officialConfigured) connectedProviders.push("official");
+
+  console.log("admin-whatsapp-lab get-context done", {
+    requestId: requestId || null,
+    professionalId: selectedProfessionalId,
+    campaignsCount: campaignIds.length,
+    warningsCount: warnings.length,
+    providers: connectedProviders,
+  });
 
   return {
     professionals: professionals || [],
@@ -279,16 +490,19 @@ async function getContextData(
         connectedProviders,
       },
       campaignDashboard: campaignDashboardRes,
-      opportunities: opportunitiesRes.data || [],
-      notifications: notificationsRes.data || [],
+      opportunities,
+      notifications,
       automations,
       automationRuns,
-      dispatchJobs: dispatchJobsRes.data || [],
+      dispatchJobs,
       dispatchJobsSummary: jobsSummary,
-      recentEvents: eventsRes.data || [],
-      recentRecipients: recipientsRes.data || [],
-      recentAttributions: attributionsRes.data || [],
-      lastWhatsappLog: lastWhatsappLogRes.data || null,
+      recentEvents,
+      recentRecipients,
+      recentAttributions,
+      lastWhatsappLog,
+    },
+    diagnostics: {
+      warnings,
     },
   };
 }
@@ -304,19 +518,54 @@ serve(async (req) => {
     { auth: { persistSession: false } },
   );
 
-  try {
-    const auth = await assertAdminMaster(req, supabase);
-    if (!auth.ok) return jsonResponse({ success: false, error: auth.error }, auth.status);
+  const requestId = crypto.randomUUID().replaceAll("-", "").slice(0, 12);
+  let action = "";
+  let stage = "request_start";
+  console.log("admin-whatsapp-lab request received", {
+    requestId,
+    method: req.method,
+    path: new URL(req.url).pathname,
+  });
 
+  try {
+    stage = "auth_check";
+    const auth = await assertAdminMaster(req, supabase);
+    if (!auth.ok) {
+      console.warn("admin-whatsapp-lab auth denied", {
+        requestId,
+        status: auth.status,
+        error: auth.error,
+        details: auth.details || null,
+      });
+      return jsonResponse({
+        success: false,
+        error: auth.error,
+        details: {
+          requestId,
+          stage,
+          ...(auth.details || {}),
+        },
+      }, auth.status);
+    }
+    console.log("admin-whatsapp-lab auth ok", { requestId, userId: auth.userId });
+
+    stage = "parse_body";
     const parsedBody = await parseJsonBody(req);
     if (!parsedBody.ok) return jsonResponse({ success: false, error: parsedBody.error }, 400);
 
-    const action = asString(parsedBody.data.action);
+    action = asString(parsedBody.data.action);
     if (!action) return jsonResponse({ success: false, error: "action is required" }, 400);
 
     const professionalId = asString(parsedBody.data.professionalId);
+    console.log("admin-whatsapp-lab action received", {
+      requestId,
+      action,
+      professionalId: professionalId || null,
+    });
+
     if (action === "get-context") {
-      const data = await getContextData(supabase, professionalId || undefined);
+      stage = "get_context";
+      const data = await getContextData(supabase, professionalId || undefined, requestId);
       return jsonResponse({ success: true, ...data });
     }
 
@@ -324,9 +573,11 @@ serve(async (req) => {
       return jsonResponse({ success: false, error: "professionalId is required for this action" }, 400);
     }
 
+    stage = "resolve_professional";
     const professional = await resolveProfessional(supabase, professionalId);
     if (!professional) return jsonResponse({ success: false, error: "Professional not found" }, 404);
 
+    stage = `action_${action}`;
     switch (action) {
       case "send-direct-message": {
         const message = asString(parsedBody.data.message);
@@ -855,10 +1106,11 @@ serve(async (req) => {
             steps.push({ step, ok: true, result });
             return result;
           } catch (error) {
+            const serialized = toSerializedError(error);
             steps.push({
               step,
               ok: false,
-              error: error instanceof Error ? error.message : String(error),
+              error: serialized.message,
             });
             return null;
           }
@@ -1010,7 +1262,13 @@ serve(async (req) => {
         return jsonResponse({ success: false, error: `Unknown action: ${action}` }, 400);
     }
   } catch (error) {
-    console.error("admin-whatsapp-lab unexpected error:", error);
-    return jsonResponse({ success: false, error: error instanceof Error ? error.message : String(error) }, 500);
+    return buildErrorResponse({
+      requestId,
+      action,
+      stage,
+      error,
+      status: 500,
+      prefix: "admin-whatsapp-lab failed",
+    });
   }
 });
