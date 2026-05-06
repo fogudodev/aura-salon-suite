@@ -1,73 +1,98 @@
-# Welcome to your Lovable project
+# Aura Salon Suite / Gende
 
-## Project info
+SaaS multi-tenant para salões de beleza e profissionais autônomos.
 
-**URL**: https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID
+## Stack real
 
-## How can I edit this code?
+- Frontend: React 18 + TypeScript + Vite
+- UI: Tailwind + shadcn/ui + Radix
+- Estado remoto: TanStack Query
+- Backend: Supabase self-hosted em VPS
+- Edge Functions: Deno
+- Integrações principais: Stripe, Evolution API, Google Calendar, Gemini
 
-There are several ways of editing your application.
+## Premissas importantes
 
-**Use Lovable**
+- Este projeto não usa Supabase Cloud.
+- Parte da operação de produção pode depender de configuração manual na VPS.
+- O banco e as migrations são a fonte de verdade para comportamento crítico.
+- Mudanças estruturais de banco devem passar por `supabase/migrations/`.
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and start prompting.
+## Fluxos centrais
 
-Changes made via Lovable will be committed automatically to this repo.
+- Booking público em `/:slug` via `src/pages/PublicBooking.tsx`
+- Configuração da página pública em `/public-page` via `src/pages/PublicPage.tsx`
+- Booking público atual usa RPCs:
+  - `get_available_slots_v2`
+  - `create_public_booking_v2`
+  - `get_public_payment_config`
+  - `get_public_client_by_phone`
+  - `get_public_review_context`
 
-**Use your preferred IDE**
+## Desenvolvimento local
 
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
+Pré-requisitos:
 
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
+- Node.js 18+
+- npm
 
-Follow these steps:
+Instalação:
 
 ```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
+npm install
+```
 
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
+Rodar frontend:
 
-# Step 3: Install the necessary dependencies.
-npm i
-
-# Step 4: Start the development server with auto-reloading and an instant preview.
+```sh
 npm run dev
 ```
 
-**Edit a file directly in GitHub**
+Build de produção:
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+```sh
+npm run build
+```
 
-**Use GitHub Codespaces**
+Testes:
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+```sh
+npm test
+```
 
-## What technologies are used for this project?
+Lint:
 
-This project is built with:
+```sh
+npm run lint
+```
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
+## Estrutura útil
 
-## How can I deploy this project?
+- `src/App.tsx`: registro principal de rotas
+- `src/pages/`: páginas e containers
+- `src/components/`: componentes reutilizáveis
+- `src/hooks/`: acesso a dados e lógica de tela
+- `src/lib/`: utilitários e clientes
+- `supabase/migrations/`: schema, RPCs e triggers
+- `supabase/functions/`: Edge Functions
 
-Simply open [Lovable](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and click on Share -> Publish.
+## Documentação interna
 
-## Can I connect a custom domain to my Lovable project?
+- `ARCHITECTURE_BRIEFING.md`
+- `DOMAIN_OPERATIONS_MAP.md`
+- `PROJECT_STANDARDS.md`
+- `PROJECT_MAP.md`
+- `AI_GUIDELINES.md`
 
-Yes, you can!
+## Git
 
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
+Fluxo básico:
 
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
+```sh
+git status
+git add <arquivos>
+git commit -m "feat: descrição"
+git push origin <branch>
+```
+
+Como o worktree pode conter mudanças locais não relacionadas, prefira `git add` por arquivo em vez de `git add .`.

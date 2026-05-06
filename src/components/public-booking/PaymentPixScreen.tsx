@@ -45,18 +45,28 @@ export function PaymentPixScreen({
   return (
     <div className="space-y-5 px-5 pb-6 pt-5" style={{ color: theme.text }}>
       <section
-        className="rounded-[28px] px-5 pb-6 pt-5 shadow-[0_24px_52px_-24px_rgba(190,24,93,0.55)]"
+        className="rounded-[32px] px-5 pb-6 pt-5 shadow-[0_24px_52px_-24px_rgba(190,24,93,0.55)]"
         style={{ background: theme.accentGradientVertical, color: theme.inverseText, boxShadow: `0 24px 52px -24px ${theme.accentShadow}` }}
       >
-        <p className="text-center text-[11px] font-semibold uppercase tracking-[0.32em]" style={{ color: "rgba(255,255,255,0.72)" }}>Pagamento PIX</p>
-        <h2 className="mt-2 text-center text-[26px] font-black leading-tight">Reserve sua vaga</h2>
+        <div className="flex items-center justify-between gap-3">
+          <span className="rounded-full px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.24em]" style={{ backgroundColor: "rgba(255,255,255,0.14)", color: "rgba(255,255,255,0.82)" }}>Pagamento PIX</span>
+          <span className="rounded-full px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.22em]" style={{ backgroundColor: "rgba(255,255,255,0.14)", color: theme.inverseText }}>{signalAmountLabel}</span>
+        </div>
+        <h2 className="mt-4 text-center text-[28px] font-black leading-tight">Reserve sua vaga</h2>
         <p className="mt-2 text-center text-[13px] leading-5" style={{ color: "rgba(255,255,255,0.82)" }}>
           Escaneie o QR Code, copie o código e finalize no seu banco.
         </p>
 
-        <div className="mt-5 rounded-[28px] p-5" style={{ backgroundColor: theme.surface, color: theme.text }}>
+        <div className="mt-5 rounded-[30px] p-5" style={{ backgroundColor: theme.surface, color: theme.text }}>
           <div className="mx-auto flex w-fit rounded-[26px] p-4 shadow-[0_20px_40px_-28px_rgba(15,23,42,0.45)]" style={{ border: `1px solid ${theme.border}`, backgroundColor: "#ffffff" }}>
             <QRCodeSVG value={code} size={208} />
+          </div>
+
+          <div className="mt-5 grid grid-cols-2 gap-3">
+            <InfoCard theme={theme} label="Cliente" value={clientName} />
+            <InfoCard theme={theme} label="Profissional" value={professionalName} />
+            <InfoCard theme={theme} label="Data" value={dateLabel} />
+            <InfoCard theme={theme} label="Horário" value={timeLabel} />
           </div>
 
           <div className="mt-5 rounded-[24px] p-4" style={{ backgroundColor: theme.surfaceAlt }}>
@@ -79,7 +89,7 @@ export function PaymentPixScreen({
       </section>
 
       <section
-        className="rounded-[26px] p-5 shadow-[0_20px_40px_-28px_rgba(15,23,42,0.28)]"
+        className="rounded-[28px] p-5 shadow-[0_20px_40px_-28px_rgba(15,23,42,0.22)]"
         style={{ border: `1px solid ${theme.border}`, backgroundColor: theme.surface }}
       >
         <div className="flex items-center justify-between gap-3">
@@ -100,13 +110,6 @@ export function PaymentPixScreen({
               background: paymentCountdown <= 60 ? "linear-gradient(90deg,#fb7185,#f97316)" : theme.accentGradient,
             }}
           />
-        </div>
-
-        <div className="mt-5 grid grid-cols-2 gap-3">
-          <InfoCard theme={theme} label="Cliente" value={clientName} />
-          <InfoCard theme={theme} label="Profissional" value={professionalName} />
-          <InfoCard theme={theme} label="Data" value={dateLabel} />
-          <InfoCard theme={theme} label="Horário" value={timeLabel} />
         </div>
 
         <div className="mt-5 space-y-3 rounded-[24px] p-4" style={{ backgroundColor: theme.surfaceAlt }}>

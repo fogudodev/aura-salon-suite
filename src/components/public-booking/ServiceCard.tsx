@@ -32,7 +32,7 @@ export function ServiceCard({
   return (
     <article
       className={cn(
-        "relative rounded-[24px] border p-3.5 transition-all",
+        "relative rounded-[24px] border p-4 transition-all",
         selected ? "shadow-[0_22px_48px_-24px_rgba(190,24,93,0.45)]" : "shadow-[0_14px_30px_-24px_rgba(15,23,42,0.32)]",
       )}
       style={{
@@ -41,6 +41,7 @@ export function ServiceCard({
         boxShadow: selected ? `0 24px 48px -24px ${theme.accentShadow}` : undefined,
       }}
     >
+      {selected ? <div className="absolute inset-x-4 top-0 h-1 rounded-b-full" style={{ background: theme.accentGradient }} /> : null}
       <button
         type="button"
         aria-label={favorite ? "Desfavoritar servico" : "Favoritar servico"}
@@ -79,8 +80,8 @@ export function ServiceCard({
         </div>
       </div>
 
-      <div className="mt-3 flex items-end justify-between gap-3">
-        <div>
+      <div className="mt-4 flex flex-wrap items-end justify-between gap-3">
+        <div className="min-w-0">
           <p className="text-[10px] font-semibold uppercase tracking-[0.22em]" style={{ color: theme.textSoft }}>A partir de</p>
           <p className="mt-1 text-[15px] font-black" style={{ color: theme.text }}>{priceLabel}</p>
         </div>
@@ -92,21 +93,20 @@ export function ServiceCard({
         </span>
       </div>
 
-      <button
-        type="button"
-        onClick={onToggleSelect}
-        className={cn(
-          "mt-4 h-11 w-full rounded-full text-[13px] font-bold transition",
-          selected ? "" : "",
-        )}
-        style={
-          selected
-            ? { background: theme.accentGradient, color: theme.inverseText }
-            : { backgroundColor: theme.surfaceAlt, color: theme.textMuted }
-        }
-      >
-        {selected ? "Remover" : "Selecionar"}
-      </button>
+      <div className="mt-4 flex gap-3">
+        <button
+          type="button"
+          onClick={onToggleSelect}
+          className="h-12 flex-1 rounded-full text-[13px] font-bold transition active:scale-[0.99]"
+          style={
+            selected
+              ? { background: theme.accentGradient, color: theme.inverseText }
+              : { backgroundColor: theme.surfaceAlt, color: theme.textMuted }
+          }
+        >
+          {selected ? "Remover" : "Selecionar"}
+        </button>
+      </div>
     </article>
   );
 }

@@ -27,7 +27,7 @@ type AppInputProps = {
 function AppInput({ label, value, placeholder, labelColor, onChange, inputMode }: AppInputProps) {
   return (
     <label className="block">
-      <span className="mb-2 block text-[11px] font-semibold uppercase tracking-[0.3em]" style={{ color: labelColor }}>
+      <span className="mb-2 block text-[10px] font-semibold uppercase tracking-[0.32em]" style={{ color: labelColor }}>
         {label}
       </span>
       <input
@@ -36,8 +36,8 @@ function AppInput({ label, value, placeholder, labelColor, onChange, inputMode }
         onChange={(event) => onChange(event.target.value)}
         placeholder={placeholder}
         className={cn(
-          "h-16 w-full rounded-[24px] border border-[#f0e5ef] bg-white px-5 text-[15px] font-medium text-slate-900 outline-none transition",
-          "shadow-[0_12px_24px_-18px_rgba(190,24,93,0.25)] placeholder:text-slate-400 focus:border-[#d48bc6] focus:ring-4 focus:ring-[#f8d2ea]",
+          "h-14 w-full rounded-[22px] border border-[#f1e3df] bg-white px-4 text-[15px] font-medium text-slate-900 outline-none transition",
+          "shadow-[0_12px_24px_-18px_rgba(190,24,93,0.18)] placeholder:text-slate-400 focus:border-[#e7b3a3] focus:ring-4 focus:ring-[#f7ddd3]",
         )}
       />
     </label>
@@ -68,7 +68,7 @@ export function ClientForm({
 
       {checkingClient ? (
         <div
-          className="flex items-center gap-3 rounded-[24px] px-4 py-4 text-[13px] shadow-[0_16px_32px_-24px_rgba(15,23,42,0.25)]"
+          className="flex items-center gap-3 rounded-[22px] px-4 py-4 text-[13px] shadow-[0_16px_32px_-24px_rgba(15,23,42,0.18)]"
           style={{ border: `1px solid ${theme.border}`, backgroundColor: theme.surface, color: theme.textMuted }}
         >
           <Loader2 className="h-4 w-4 animate-spin" style={{ color: theme.accent }} />
@@ -78,7 +78,7 @@ export function ClientForm({
 
       {isRecognizedClient && recognizedClientName ? (
         <div
-          className="rounded-[24px] px-4 py-4 shadow-[0_18px_36px_-26px_rgba(190,24,93,0.35)]"
+          className="rounded-[22px] px-4 py-4 shadow-[0_18px_36px_-26px_rgba(190,24,93,0.24)]"
           style={{ backgroundColor: theme.surfaceMuted, boxShadow: `0 18px 36px -26px ${theme.accentShadow}` }}
         >
           <p className="text-[16px] font-bold" style={{ color: theme.text }}>

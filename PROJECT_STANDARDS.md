@@ -181,8 +181,10 @@ Admin UI → Edge Function admin-create-professional
 ### 6.3 Agendamento Público
 ```
 URL /:slug → PublicBooking.tsx → Busca profissional por slug 
-→ Renderiza página pública → Usuário seleciona serviço/horário 
-→ RPC create_public_booking → Cria cliente + booking
+→ Renderiza fluxo público em 5 etapas
+→ Dia → Profissional → Serviços → Horário → Confirmação
+→ RPC get_available_slots_v2 / create_public_booking_v2
+→ Cria cliente + booking
 ```
 
 ---
