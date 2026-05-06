@@ -158,14 +158,10 @@ Capacidades:
 
 Backend associado:
 
-- runtime atual:
-  - `public.get_available_slots_v2`
-  - `public.create_public_booking_v2`
-- suporte complementar:
-  - `public.get_public_payment_config`
-  - `public.get_public_client_by_phone`
-  - `public.get_public_client_service_favorites`
-  - `public.toggle_public_service_favorite`
+- `public.get_available_slots`
+- `public.get_available_slots_v2`
+- `public.create_public_booking`
+- `public.create_public_booking_v2`
 - `public.auto_mark_no_show`
 
 ### 3.3 Clientes
@@ -940,6 +936,8 @@ Observação importante:
 
 ### RPCs de operação e booking
 
+- `get_available_slots`
+- `create_public_booking`
 - `get_available_slots_v2`
 - `create_public_booking_v2`
 - `get_public_payment_config`

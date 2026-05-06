@@ -19,4 +19,4 @@
 ### Key Workflows
 - **Signup**: Frontend -> Supabase Auth -> `handle_new_user` trigger -> `professionals` table -> Automatic Slug Generation trigger.
 - **Admin Creation**: Admin UI -> `admin-create-professional` Edge Function -> Supabase Auth Admin -> `handle_new_user` trigger.
-- **Public Booking**: URL with `/:slug` -> `PublicBooking.tsx` -> Fetch profile by slug -> 5-step booking flow -> RPCs `get_available_slots_v2` / `create_public_booking_v2`.
+- **Public Booking**: URL with `/:slug` -> `PublicBooking.tsx` -> Fetch profile by slug -> Render booking UI.

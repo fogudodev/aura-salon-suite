@@ -1,98 +1,73 @@
-# Aura Salon Suite / Gende
+# Welcome to your Lovable project
 
-SaaS multi-tenant para salões de beleza e profissionais autônomos.
+## Project info
 
-## Stack real
+**URL**: https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID
 
-- Frontend: React 18 + TypeScript + Vite
-- UI: Tailwind + shadcn/ui + Radix
-- Estado remoto: TanStack Query
-- Backend: Supabase self-hosted em VPS
-- Edge Functions: Deno
-- Integrações principais: Stripe, Evolution API, Google Calendar, Gemini
+## How can I edit this code?
 
-## Premissas importantes
+There are several ways of editing your application.
 
-- Este projeto não usa Supabase Cloud.
-- Parte da operação de produção pode depender de configuração manual na VPS.
-- O banco e as migrations são a fonte de verdade para comportamento crítico.
-- Mudanças estruturais de banco devem passar por `supabase/migrations/`.
+**Use Lovable**
 
-## Fluxos centrais
+Simply visit the [Lovable Project](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and start prompting.
 
-- Booking público em `/:slug` via `src/pages/PublicBooking.tsx`
-- Configuração da página pública em `/public-page` via `src/pages/PublicPage.tsx`
-- Booking público atual usa RPCs:
-  - `get_available_slots_v2`
-  - `create_public_booking_v2`
-  - `get_public_payment_config`
-  - `get_public_client_by_phone`
-  - `get_public_review_context`
+Changes made via Lovable will be committed automatically to this repo.
 
-## Desenvolvimento local
+**Use your preferred IDE**
 
-Pré-requisitos:
+If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
 
-- Node.js 18+
-- npm
+The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
 
-Instalação:
+Follow these steps:
 
 ```sh
-npm install
-```
+# Step 1: Clone the repository using the project's Git URL.
+git clone <YOUR_GIT_URL>
 
-Rodar frontend:
+# Step 2: Navigate to the project directory.
+cd <YOUR_PROJECT_NAME>
 
-```sh
+# Step 3: Install the necessary dependencies.
+npm i
+
+# Step 4: Start the development server with auto-reloading and an instant preview.
 npm run dev
 ```
 
-Build de produção:
+**Edit a file directly in GitHub**
 
-```sh
-npm run build
-```
+- Navigate to the desired file(s).
+- Click the "Edit" button (pencil icon) at the top right of the file view.
+- Make your changes and commit the changes.
 
-Testes:
+**Use GitHub Codespaces**
 
-```sh
-npm test
-```
+- Navigate to the main page of your repository.
+- Click on the "Code" button (green button) near the top right.
+- Select the "Codespaces" tab.
+- Click on "New codespace" to launch a new Codespace environment.
+- Edit files directly within the Codespace and commit and push your changes once you're done.
 
-Lint:
+## What technologies are used for this project?
 
-```sh
-npm run lint
-```
+This project is built with:
 
-## Estrutura útil
+- Vite
+- TypeScript
+- React
+- shadcn-ui
+- Tailwind CSS
 
-- `src/App.tsx`: registro principal de rotas
-- `src/pages/`: páginas e containers
-- `src/components/`: componentes reutilizáveis
-- `src/hooks/`: acesso a dados e lógica de tela
-- `src/lib/`: utilitários e clientes
-- `supabase/migrations/`: schema, RPCs e triggers
-- `supabase/functions/`: Edge Functions
+## How can I deploy this project?
 
-## Documentação interna
+Simply open [Lovable](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and click on Share -> Publish.
 
-- `ARCHITECTURE_BRIEFING.md`
-- `DOMAIN_OPERATIONS_MAP.md`
-- `PROJECT_STANDARDS.md`
-- `PROJECT_MAP.md`
-- `AI_GUIDELINES.md`
+## Can I connect a custom domain to my Lovable project?
 
-## Git
+Yes, you can!
 
-Fluxo básico:
+To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
 
-```sh
-git status
-git add <arquivos>
-git commit -m "feat: descrição"
-git push origin <branch>
-```
-
-Como o worktree pode conter mudanças locais não relacionadas, prefira `git add` por arquivo em vez de `git add .`.
+Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)

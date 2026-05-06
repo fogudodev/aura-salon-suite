@@ -31,12 +31,12 @@ export function PublicPlatformReviewDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="max-w-[440px] rounded-[32px] border-0 p-0 shadow-[0_30px_90px_-34px_rgba(15,23,42,0.48)]"
+        className="max-w-[440px] rounded-[28px] border-0 p-0 shadow-[0_30px_90px_-34px_rgba(15,23,42,0.48)]"
         style={{ backgroundColor: theme.surface }}
       >
-        <div className="overflow-hidden rounded-[32px]">
+        <div className="overflow-hidden rounded-[28px]">
           <div className="px-6 pb-5 pt-6" style={{ background: theme.accentGradientVertical, color: theme.inverseText }}>
-            <p className="inline-flex rounded-full px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.26em]" style={{ backgroundColor: "rgba(255,255,255,0.14)", color: "rgba(255,255,255,0.72)" }}>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.32em]" style={{ color: "rgba(255,255,255,0.72)" }}>
               Sua opiniao importa
             </p>
             <DialogHeader className="mt-3 space-y-2 text-left">
@@ -50,7 +50,7 @@ export function PublicPlatformReviewDialog({
           </div>
 
           <div className="px-6 pb-6 pt-5">
-            <div className="rounded-[24px] p-4" style={{ backgroundColor: theme.surfaceMuted }}>
+            <div className="rounded-[22px] p-4" style={{ backgroundColor: theme.surfaceMuted }}>
               <p className="text-sm font-semibold" style={{ color: theme.text }}>
                 De 1 a 5 estrelas, como voce avaliaria a plataforma?
               </p>
@@ -71,7 +71,7 @@ export function PublicPlatformReviewDialog({
                 value={comment}
                 onChange={(event) => onCommentChange(event.target.value)}
                 placeholder="Conte o que funcionou bem ou o que pode melhorar."
-                className="min-h-[120px] rounded-[24px] border-0 px-4 py-3 text-sm leading-6 shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"
+                className="min-h-[120px] rounded-[20px] border-0 px-4 py-3 text-sm leading-6 shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"
                 style={{
                   backgroundColor: theme.surfaceMuted,
                   color: theme.text,

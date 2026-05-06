@@ -2,7 +2,7 @@ import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useParams } from "react-router-dom";
 import { addDays, format } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { ArrowLeft, CheckCircle2, Loader2, Sparkles, Star } from "lucide-react";
+import { ArrowLeft, CheckCircle2, Loader2, MapPin, Sparkles, Star } from "lucide-react";
 import { toast } from "sonner";
 import { ClientForm } from "@/components/public-booking/ClientForm";
 import { DateSelector } from "@/components/public-booking/DateSelector";
@@ -49,13 +49,7 @@ const cleanPhone = (value: string) => value.replace(/\D/g, "").slice(0, 11);
 const maskPhone = (value: string) => { const digits = cleanPhone(value); if (digits.length <= 2) return digits; if (digits.length <= 7) return `(${digits.slice(0, 2)}) ${digits.slice(2)}`; return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`; };
 const waPhone = (value?: string | null) => { const digits = (value || "").replace(/\D/g, ""); if (!digits) return ""; return digits.startsWith("55") ? digits : `55${digits}`; };
 const timeSP = (value: string) => new Intl.DateTimeFormat("pt-BR", { timeZone: "America/Sao_Paulo", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(value));
-const stepTitles = {
-  1: "Escolha o dia",
-  2: "Escolha o profissional",
-  3: "Escolha os serviços",
-  4: "Escolha o horário",
-  5: "Confirme o agendamento",
-} as const;
+const stepTitles = { 1: "Seus dados", 2: "Escolha os serviços", 3: "Escolha data e hora", 4: "Confirme o agendamento" } as const;
 
 const PublicBooking = () => {
   const { slug } = useParams<{ slug: string }>();
@@ -396,9 +390,6 @@ const PublicBooking = () => {
   const isRecognizedClient = clientLookupState === "recognized";
   const showNameField = clientLookupState === "new";
   const canMoveFromStep1 = cleanPhone(clientPhone).length >= 10 && clientLookupState !== "checking" && (isRecognizedClient || clientName.trim().length >= 2);
-  const canMoveFromStep2 = !isSalon || Boolean(employeeId);
-  const canMoveFromStep3 = serviceIds.length > 0;
-  const canMoveFromStep4 = Boolean(selectedDate && slot && (!isSalon || employeeId));
   const slotsEmptyMessage = !selectedDate
     ? "Escolha uma data para ver os horários disponíveis."
     : isSalon && !employeeId
@@ -411,15 +402,6 @@ const PublicBooking = () => {
   const reviewServiceName = reviewContext?.service_name || "seu atendimento";
   const reviewReady = reviewContext?.booking_status === "completed";
   const reviewAlreadySubmitted = professionalReviewSubmitted || Boolean(reviewContext?.professional_review_submitted);
-  const selectedDateLabel = selectedDate ? format(selectedDate, "dd 'de' MMMM", { locale: ptBR }) : "Escolha um dia";
-  const selectedEmployeeLabel = selectedEmployee?.name || professional?.name || "Definir profissional";
-  const stepMeta = {
-    1: "Calendário",
-    2: isSalon ? "Equipe" : "Atendimento",
-    3: "Serviços",
-    4: "Horários",
-    5: "Resumo",
-  } as const;
 
   if (loading) return <CenteredState><div className="flex h-16 w-16 items-center justify-center rounded-full shadow-lg" style={{ backgroundColor: theme.surface }}><Loader2 className="h-7 w-7 animate-spin" style={{ color: theme.accent }} /></div></CenteredState>;
   if (notFound || !professional) return <CenteredState><div className="rounded-[30px] px-8 py-10 text-center shadow-[0_26px_70px_-28px_rgba(15,23,42,0.4)]" style={{ backgroundColor: theme.surface }}><p className="text-[11px] font-semibold uppercase tracking-[0.32em]" style={{ color: theme.textMuted }}>Link indisponível</p><h1 className="mt-3 text-2xl font-black" style={{ color: theme.text }}>Página não encontrada</h1><p className="mt-3 text-sm leading-6" style={{ color: theme.textMuted }}>O link público deste profissional não está disponível no momento.</p></div></CenteredState>;
@@ -447,12 +429,12 @@ const PublicBooking = () => {
 
   return (
     <div
-      className="min-h-screen px-3 py-3 sm:px-6 sm:py-6"
+      className="min-h-screen px-3 py-4 sm:px-6 sm:py-6"
       style={{ background: theme.pageBackground }}
     >
       <div className="mx-auto max-w-[430px]">
         <div className="overflow-hidden rounded-[38px] shadow-[0_32px_90px_-30px_rgba(15,23,42,0.38)]" style={{ backgroundColor: theme.shell }}>
-          {signalScreen ? null : confirmed ? <GradientHeader theme={theme} title="Reserva confirmada" eyebrow="Tudo pronto" /> : step === 1 ? <HeroHeader theme={theme} coverUrl={professional.cover_url} description={greetingDescription} logoUrl={professional.logo_url || professional.avatar_url} title={greetingTitle} /> : <GradientHeader theme={theme} title={stepTitles[step as 1 | 2 | 3 | 4 | 5]} eyebrow={stepMeta[step as 1 | 2 | 3 | 4 | 5]} onBack={() => setStep((current) => Math.max(1, current - 1))} />}
+          {signalScreen ? null : confirmed ? <GradientHeader theme={theme} title="Reserva confirmada" /> : step === 1 ? <HeroHeader theme={theme} coverUrl={professional.cover_url} description={greetingDescription} logoUrl={professional.logo_url || professional.avatar_url} title={greetingTitle} /> : <GradientHeader theme={theme} title={stepTitles[step as 1 | 2 | 3 | 4]} onBack={() => setStep((current) => Math.max(1, current - 1))} />}
 
           {signalScreen ? (
             <PaymentPixScreen
@@ -473,17 +455,8 @@ const PublicBooking = () => {
             />
           ) : confirmed && slot ? (
             <div className="px-5 pb-6 pt-5">
-              <div className="mb-5 flex gap-2">{[1, 2, 3, 4, 5].map((item) => <div key={item} className="h-2 flex-1 rounded-full" style={{ backgroundColor: theme.accent }} />)}</div>
-              <div className="rounded-[32px] p-5 shadow-[0_22px_52px_-30px_rgba(190,24,93,0.35)]" style={{ backgroundColor: theme.surfaceMuted, boxShadow: `0 22px 52px -30px ${theme.accentShadow}` }}>
-                <div className="mb-4 flex items-center justify-between gap-3">
-                  <div>
-                    <p className="text-[10px] font-semibold uppercase tracking-[0.28em]" style={{ color: theme.textSoft }}>Agendamento concluído</p>
-                    <p className="mt-1 text-[13px] font-medium" style={{ color: theme.textMuted }}>Reserva registrada com sucesso</p>
-                  </div>
-                  <span className="rounded-full px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.22em]" style={{ backgroundColor: theme.surface, color: theme.accentStrong }}>
-                    #{bookingId?.slice(0, 6).toUpperCase() || "AGENDA"}
-                  </span>
-                </div>
+              <div className="mb-5 flex gap-2">{[1, 2, 3, 4].map((item) => <div key={item} className="h-2 flex-1 rounded-full" style={{ backgroundColor: theme.accent }} />)}</div>
+              <div className="rounded-[30px] p-5 shadow-[0_20px_48px_-28px_rgba(190,24,93,0.35)]" style={{ backgroundColor: theme.surfaceMuted, boxShadow: `0 20px 48px -28px ${theme.accentShadow}` }}>
                 <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full" style={{ backgroundColor: theme.successSoft, color: theme.successText }}><CheckCircle2 size={30} /></div>
                 <h2 className="mt-4 text-center text-[26px] font-black leading-tight" style={{ color: theme.text }}>Tudo certo, {clientName.split(" ")[0] || "cliente"}.</h2>
                 <p className="mt-2 text-center text-sm leading-6" style={{ color: theme.textMuted }}>{professional.confirmation_message || "Seu horário já está reservado."}</p>
@@ -491,11 +464,11 @@ const PublicBooking = () => {
                   {selectedServices.map((service) => {
                     const icon = getServiceIconOption(service.icon_key, service.name, service.category);
                     return (
-                      <div key={service.id} className="flex items-center gap-4 rounded-[26px] px-4 py-4 shadow-[0_16px_34px_-26px_rgba(15,23,42,0.28)]" style={{ backgroundColor: theme.surface }}>
+                      <div key={service.id} className="flex items-center gap-4 rounded-[24px] px-4 py-4 shadow-[0_16px_34px_-26px_rgba(15,23,42,0.38)]" style={{ backgroundColor: theme.surface }}>
                         <div className="flex h-14 w-14 items-center justify-center rounded-[18px] text-2xl" style={{ backgroundColor: theme.surfaceAlt }}>{icon.emoji}</div>
                         <div className="min-w-0 flex-1">
                           <p className="text-[15px] font-bold" style={{ color: theme.text }}>{service.name}</p>
-                          <p className="mt-1 text-[12px]" style={{ color: theme.textSoft }}>Reservado para {bookingDateShortLabel} às {bookingTimeLabel}</p>
+                          <p className="mt-1 text-[12px]" style={{ color: theme.textSoft }}>ID: {bookingId?.slice(0, 8).toUpperCase() || "AGENDA"}</p>
                         </div>
                         <span className="rounded-full px-3 py-1.5 text-[11px] font-bold" style={{ backgroundColor: theme.successSoft, color: theme.successText }}>Confirmado</span>
                       </div>
@@ -513,113 +486,52 @@ const PublicBooking = () => {
               </div>
             </div>
           ) : (
-            <div className="px-5 pb-[calc(1.5rem+env(safe-area-inset-bottom))] pt-4">
-              <StepProgress theme={theme} step={step} total={5} />
+            <div className="px-5 pb-6 pt-4">
+              <StepProgress theme={theme} step={step} />
 
               {step === 1 ? (
-                <div className="space-y-5 pt-5">
-                  <SectionIntro theme={theme} eyebrow="Passo 1" title="Escolha o dia" subtitle="Comece pela data do atendimento. Seus dados entram aqui para liberar favoritos e concluir a reserva sem atrito." />
-                  <div className="rounded-[18px] px-4 py-3" style={{ backgroundColor: theme.surfaceMuted }}>
-                    <p className="text-[10px] font-semibold uppercase tracking-[0.22em]" style={{ color: theme.textSoft }}>Como funciona</p>
-                    <p className="mt-1 text-[13px] leading-5" style={{ color: theme.textMuted }}>Primeiro você escolhe o dia. Depois confirmamos seus dados para reconhecer cadastro anterior e manter os serviços favoritos disponíveis.</p>
-                  </div>
-                  <div className="rounded-[28px] p-4 shadow-[0_18px_40px_-28px_rgba(15,23,42,0.24)]" style={{ backgroundColor: theme.surface }}>
-                    <DateSelector theme={theme} days={days} selectedDate={selectedDate} onSelect={(date) => { setSelectedDate(date); setSlot(null); }} />
-                  </div>
-                  <div className="rounded-[28px] p-4 shadow-[0_18px_40px_-28px_rgba(15,23,42,0.24)]" style={{ backgroundColor: theme.surface }}>
+                <div className="pt-5">
+                  <SectionIntro theme={theme} eyebrow="Etapa 1" title="Antes de começar" subtitle="Informe seu WhatsApp para continuar o agendamento." />
+                  <ClientForm theme={theme} clientName={clientName} clientPhone={clientPhone} checkingClient={clientLookupState === "checking"} isRecognizedClient={isRecognizedClient} recognizedClientName={recognizedClientName} showNameField={showNameField} onClientNameChange={(value) => setClientName(value)} onClientPhoneChange={(value) => { setClientPhone(maskPhone(value)); activeClientLookupKeyRef.current = ""; lastClientLookupKeyRef.current = ""; }} />
+                  <div className="mt-5 rounded-[26px] p-4 shadow-[0_18px_40px_-28px_rgba(190,24,93,0.34)]" style={{ backgroundColor: theme.surfaceMuted, boxShadow: `0 18px 40px -28px ${theme.accentShadow}` }}>
                     <div className="flex items-start gap-3">
-                      <div className="mt-0.5 flex h-10 w-10 items-center justify-center rounded-full shadow-sm" style={{ backgroundColor: theme.surfaceMuted, color: theme.accent }}><Sparkles size={18} /></div>
+                      <div className="mt-0.5 flex h-10 w-10 items-center justify-center rounded-full shadow-sm" style={{ backgroundColor: theme.surface, color: theme.accent }}><Sparkles size={18} /></div>
                       <div>
-                        <p className="text-[13px] font-bold" style={{ color: theme.text }}>Seus dados para o agendamento</p>
-                        <p className="mt-1 text-[13px] leading-5" style={{ color: theme.textMuted }}>Primeiro verificamos seu WhatsApp. Se você já tiver cadastro, a experiência fica mais rápida e seus serviços preferidos aparecem automaticamente.</p>
+                        <p className="text-[13px] font-bold" style={{ color: theme.text }}>Fluxo rápido e inteligente</p>
+                        <p className="mt-1 text-[13px] leading-5" style={{ color: theme.textMuted }}>Primeiro verificamos seu WhatsApp. Se você já tiver cadastro, seguimos mais rápido.</p>
                       </div>
                     </div>
-                    <div className="mt-4">
-                      <ClientForm theme={theme} clientName={clientName} clientPhone={clientPhone} checkingClient={clientLookupState === "checking"} isRecognizedClient={isRecognizedClient} recognizedClientName={recognizedClientName} showNameField={showNameField} onClientNameChange={(value) => setClientName(value)} onClientPhoneChange={(value) => { setClientPhone(maskPhone(value)); activeClientLookupKeyRef.current = ""; lastClientLookupKeyRef.current = ""; }} />
-                    </div>
                   </div>
-                  <PrimaryAction theme={theme} onClick={() => { if (!canMoveFromStep1) { toast.error(showNameField ? "Preencha seu nome para continuar." : "Informe um WhatsApp válido para continuar."); return; } if (!selectedDate) { toast.error("Escolha um dia para continuar."); return; } setStep(2); }}>Continuar</PrimaryAction>
+                  <PrimaryAction theme={theme} className="mt-6" onClick={() => { if (!canMoveFromStep1) { toast.error(showNameField ? "Preencha seu nome para continuar." : "Informe um WhatsApp válido para continuar."); return; } setStep(2); }}>Escolher serviços</PrimaryAction>
                 </div>
               ) : null}
 
               {step === 2 ? (
-                <div className="space-y-5 pt-5">
-                  <SectionIntro theme={theme} eyebrow="Passo 2" title={isSalon ? "Escolha o profissional" : "Seu atendimento"} subtitle={isSalon ? "Selecione quem vai conduzir o atendimento. A disponibilidade continua sendo recalculada conforme os serviços escolhidos." : "Seu agendamento será atendido diretamente por este profissional."} />
-                  <SelectionStrip theme={theme} items={[{ label: "Dia", value: selectedDateLabel }, { label: "WhatsApp", value: maskPhone(clientPhone) }]} />
-                  {isSalon ? (
-                    <div className="grid gap-3">
-                      {filteredEmployees.map((employee) => <ProfessionalCard key={employee.id} theme={theme} avatarUrl={employee.avatar_url} name={employee.name} selected={employeeId === employee.id} specialty={employee.specialty} onClick={() => { setEmployeeId(employee.id); setSlot(null); }} />)}
-                    </div>
-                  ) : (
-                    <div className="rounded-[28px] p-4 shadow-[0_18px_40px_-28px_rgba(15,23,42,0.24)]" style={{ backgroundColor: theme.surface }}>
-                      <div className="flex items-center gap-4">
-                        <div className="flex h-16 w-16 items-center justify-center overflow-hidden rounded-[20px]" style={{ backgroundColor: theme.surfaceMuted }}>
-                          {professional.avatar_url || professional.logo_url ? <img src={professional.avatar_url || professional.logo_url || ""} alt={professional.name} className="h-full w-full object-cover" /> : <span className="text-2xl font-black" style={{ color: theme.accentStrong }}>{professional.name.slice(0, 1).toUpperCase()}</span>}
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <p className="text-[15px] font-bold" style={{ color: theme.text }}>{professional.name}</p>
-                          <p className="mt-1 text-[13px] leading-5" style={{ color: theme.textMuted }}>{professional.business_name || "Atendimento personalizado"}</p>
-                          <div className="mt-2 flex items-center gap-1" style={{ color: theme.accent }}><Star size={12} className="fill-current" /><Star size={12} className="fill-current" /><Star size={12} className="fill-current" /><Star size={12} className="fill-current" /><Star size={12} className="fill-current opacity-40" /></div>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                  <PrimaryAction theme={theme} onClick={() => { if (!canMoveFromStep2) { toast.error("Selecione a profissional."); return; } setStep(3); }}>Continuar</PrimaryAction>
-                </div>
-              ) : null}
-
-              {step === 3 ? (
-                <div className="space-y-5 pt-5">
-                  <SectionIntro theme={theme} eyebrow="Passo 3" title="Escolha os serviços" subtitle="Monte seu atendimento. Você pode selecionar mais de um serviço e favoritar os seus preferidos." />
-                  <SelectionStrip theme={theme} items={[{ label: "Dia", value: selectedDateLabel }, { label: "Profissional", value: selectedEmployeeLabel }]} />
-                  <div className="rounded-[24px] p-4" style={{ backgroundColor: theme.surfaceMuted }}>
-                    <div className="flex items-start justify-between gap-4">
-                      <div>
-                        <p className="text-[10px] font-semibold uppercase tracking-[0.22em]" style={{ color: theme.textSoft }}>Seleção atual</p>
-                        <p className="mt-1 text-[16px] font-bold" style={{ color: theme.text }}>{selectedServices.length ? `${selectedServices.length} serviço(s)` : "Nenhum serviço ainda"}</p>
-                        <p className="mt-1 text-[13px] leading-5" style={{ color: theme.textMuted }}>
-                          {selectedServices.length ? `${totalDuration} min no total • ${money(totalPrice)}` : "Selecione pelo menos um serviço para liberar os horários."}
-                        </p>
-                      </div>
-                      {selectedServices.length ? <span className="rounded-full px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.22em]" style={{ backgroundColor: theme.surface, color: theme.accentStrong }}>Pronto para avançar</span> : null}
-                    </div>
-                    {selectedServices.length ? (
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        {selectedServices.map((service) => (
-                          <span key={service.id} className="rounded-full px-3 py-1.5 text-[11px] font-semibold" style={{ backgroundColor: theme.surface, color: theme.textMuted }}>
-                            {service.name}
-                          </span>
-                        ))}
-                      </div>
-                    ) : null}
-                  </div>
+                <div className="pt-5">
+                  <SectionIntro theme={theme} eyebrow="Etapa 2" title="Escolha os serviços" subtitle="Selecione um ou mais serviços e favorite os seus preferidos." />
                   {favoriteServices.length > 0 ? (
-                    <div className="space-y-3">
+                    <div className="mb-5 space-y-3">
                       <p className="text-[11px] font-semibold uppercase tracking-[0.28em]" style={{ color: theme.textMuted }}>Favoritos</p>
                       <div className="space-y-3">
                         {favoriteServices.slice(0, 3).map((service) => {
                           const icon = getServiceIconOption(service.icon_key, service.name, service.category);
+                          const selected = serviceIds.includes(service.id);
                           return (
-                            <ServiceCard
-                              key={service.id}
-                              theme={theme}
-                              badge="Favorito"
-                              description={service.description || service.category}
-                              durationLabel={`${service.duration_minutes} min`}
-                              favorite
-                              icon={icon.emoji}
-                              name={service.name}
-                              priceLabel={money(Number(service.price))}
-                              selected={serviceIds.includes(service.id)}
-                              onToggleFavorite={() => toggleFavorite(service.id)}
-                              onToggleSelect={() => setServiceIds((current) => current.includes(service.id) ? current.filter((id) => id !== service.id) : [...current, service.id])}
-                            />
+                            <div key={service.id} className="flex items-center gap-3 rounded-[24px] px-4 py-4 shadow-[0_18px_40px_-28px_rgba(15,23,42,0.32)]" style={{ backgroundColor: theme.surface }}>
+                              <div className="flex h-12 w-12 items-center justify-center rounded-[16px] text-2xl" style={{ backgroundColor: theme.surfaceMuted }}>{icon.emoji}</div>
+                              <div className="min-w-0 flex-1">
+                                <p className="truncate text-[14px] font-bold" style={{ color: theme.text }}>{service.name}</p>
+                                <div className="mt-1 flex items-center gap-1.5 text-[12px]" style={{ color: theme.textSoft }}><MapPin size={12} /><span className="truncate">{professional.business_name || professional.name}</span></div>
+                                <div className="mt-2 flex items-center gap-1" style={{ color: theme.accent }}><Star size={12} className="fill-current" /><Star size={12} className="fill-current" /><Star size={12} className="fill-current" /><Star size={12} className="fill-current" /><Star size={12} className="fill-current opacity-40" /></div>
+                              </div>
+                              <button type="button" onClick={() => setServiceIds((current) => current.includes(service.id) ? current.filter((id) => id !== service.id) : [...current, service.id])} className="h-10 rounded-full px-4 text-[12px] font-bold" style={selected ? { background: theme.accentGradient, color: theme.inverseText } : { backgroundColor: theme.surfaceAlt, color: theme.textMuted }}>{selected ? "Selecionado" : "Agendar"}</button>
+                            </div>
                           );
                         })}
                       </div>
                     </div>
                   ) : null}
-                  <div className="space-y-3">
+                  <div className="grid grid-cols-2 gap-3">
                     {services.map((service) => {
                       const icon = getServiceIconOption(service.icon_key, service.name, service.category);
                       return (
@@ -640,26 +552,37 @@ const PublicBooking = () => {
                       );
                     })}
                   </div>
-                  <PrimaryAction theme={theme} onClick={() => { if (!canMoveFromStep3) { toast.error("Selecione ao menos um serviço."); return; } setStep(4); }}>{selectedServices.length ? `Continuar com ${selectedServices.length} serviço(s)` : "Continuar"}</PrimaryAction>
+                  <PrimaryAction theme={theme} className="mt-6" onClick={() => { if (!serviceIds.length) { toast.error("Selecione ao menos um serviço."); return; } setStep(3); }}>Agendar horário</PrimaryAction>
                 </div>
               ) : null}
 
-              {step === 4 ? (
+              {step === 3 ? (
                 <div className="space-y-5 pt-5">
-                  <SectionIntro theme={theme} eyebrow="Passo 4" title="Escolha o horário" subtitle="Os horários abaixo já consideram a duração total dos serviços selecionados." />
-                  <SelectionStrip theme={theme} items={[{ label: "Dia", value: selectedDateLabel }, { label: "Profissional", value: selectedEmployeeLabel }, { label: "Serviços", value: `${selectedServices.length} selecionado(s)` }]} />
-                  <div className="rounded-[28px] p-4 shadow-[0_18px_40px_-28px_rgba(15,23,42,0.24)]" style={{ backgroundColor: theme.surface }}>
-                    {!loadingSlots && slots.length ? <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">{slots.map((item) => <TimeSlot key={item.start_time} theme={theme} label={timeSP(item.start_time)} selected={slot?.start_time === item.start_time} onClick={() => setSlot(item)} />)}</div> : null}
-                    {loadingSlots ? <div className="flex items-center justify-center rounded-[24px] px-4 py-8" style={{ backgroundColor: theme.surfaceMuted }}><Loader2 className="h-5 w-5 animate-spin" style={{ color: theme.accent }} /></div> : null}
-                    {!loadingSlots && !slots.length ? <div className="rounded-[24px] px-4 py-5 text-[13px] leading-6" style={{ backgroundColor: theme.surfaceMuted, color: theme.textMuted }}>{slotsEmptyMessage}</div> : null}
+                  <div className="space-y-4">
+                    <SectionIntro theme={theme} eyebrow="AGENDA" title="Escolha a data" subtitle="Selecione o melhor dia para o seu atendimento." />
+                    <DateSelector theme={theme} days={days} selectedDate={selectedDate} onSelect={(date) => { setSelectedDate(date); setSlot(null); }} />
                   </div>
-                  <PrimaryAction theme={theme} onClick={() => { if (!canMoveFromStep4) { if (isSalon && !employeeId) return toast.error("Selecione a profissional."); return toast.error("Escolha dia e horário."); } setStep(5); }}>Continuar</PrimaryAction>
+                  {isSalon ? (
+                    <div className="space-y-4">
+                      <SectionIntro theme={theme} eyebrow="EQUIPE" title="Escolha o profissional" subtitle="Deslize e selecione quem vai realizar o atendimento." />
+                      <div className="flex gap-3 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                        {filteredEmployees.map((employee) => <ProfessionalCard key={employee.id} theme={theme} avatarUrl={employee.avatar_url} name={employee.name} selected={employeeId === employee.id} specialty={employee.specialty} onClick={() => { setEmployeeId(employee.id); setSlot(null); }} />)}
+                      </div>
+                    </div>
+                  ) : null}
+                  <div className="space-y-4">
+                    <SectionIntro theme={theme} eyebrow="HORÁRIOS" title="Horários disponíveis" subtitle={isSalon ? "Escolha um profissional para ver os horários disponíveis." : "Os horários já consideram a duração total dos serviços."} />
+                    {!loadingSlots && slots.length ? <div className="grid grid-cols-3 gap-3">{slots.map((item) => <TimeSlot key={item.start_time} theme={theme} label={timeSP(item.start_time)} selected={slot?.start_time === item.start_time} onClick={() => setSlot(item)} />)}</div> : null}
+                    {loadingSlots ? <div className="flex items-center justify-center rounded-[24px] px-4 py-6 shadow-[0_18px_38px_-28px_rgba(15,23,42,0.28)]" style={{ backgroundColor: theme.surface }}><Loader2 className="h-5 w-5 animate-spin" style={{ color: theme.accent }} /></div> : null}
+                    {!loadingSlots && !slots.length ? <div className="rounded-[24px] px-4 py-5 text-[13px] leading-6 shadow-[0_18px_38px_-28px_rgba(15,23,42,0.28)]" style={{ backgroundColor: theme.surface, color: theme.textMuted }}>{slotsEmptyMessage}</div> : null}
+                  </div>
+                  <PrimaryAction theme={theme} onClick={() => { if (isSalon && !employeeId) return toast.error("Selecione a profissional."); if (!selectedDate || !slot) return toast.error("Escolha dia e horário."); setStep(4); }}>Revisar agendamento</PrimaryAction>
                 </div>
               ) : null}
 
-              {step === 5 && slot ? (
+              {step === 4 && slot ? (
                 <div className="space-y-5 pt-5">
-                  <SectionIntro theme={theme} eyebrow="Passo 5" title="Confirme o agendamento" subtitle="Revise os detalhes finais. O fluxo de pagamento e confirmação continua exatamente o mesmo." />
+                  <SectionIntro theme={theme} eyebrow="Etapa 4" title="Confira os detalhes" subtitle="Revise seu agendamento antes de confirmar a reserva." />
                   <div className="space-y-3">
                     <DetailCard theme={theme} label="Cliente" value={clientName} />
                     <DetailCard theme={theme} label="WhatsApp" value={maskPhone(clientPhone)} />
@@ -675,7 +598,7 @@ const PublicBooking = () => {
                     {needsSignal ? <div className="mt-4 rounded-full px-4 py-3 text-sm font-semibold" style={{ backgroundColor: "rgba(255,255,255,0.1)", color: theme.darkPanelText }}>Sinal: {money(signalAmount)}</div> : null}
                   </div>
                   <PrimaryAction theme={theme} disabled={submitting} onClick={submitBooking}>{submitting ? "Salvando..." : needsSignal ? "Reservar vaga" : "Confirmar agendamento"}</PrimaryAction>
-                  <button type="button" onClick={() => setStep(4)} className="h-12 w-full rounded-full border text-[13px] font-bold transition" style={{ borderColor: theme.border, backgroundColor: theme.surface, color: theme.textMuted }}>Ajustar horário</button>
+                  <button type="button" onClick={() => setStep(3)} className="h-12 w-full rounded-full border text-[13px] font-bold transition" style={{ borderColor: theme.border, backgroundColor: theme.surface, color: theme.textMuted }}>Ajustar horário</button>
                 </div>
               ) : null}
             </div>
@@ -845,46 +768,26 @@ function CenteredState({ children }: { children: ReactNode }) {
 
 function HeroHeader({ theme, coverUrl, description, logoUrl, title }: { theme: ReturnType<typeof buildPublicPageTheme>; coverUrl: string | null; description: string; logoUrl: string | null; title: string }) {
   return (
-    <section className="relative overflow-hidden px-5 pb-6 pt-5" style={{ background: theme.accentGradientVertical }}>
+    <section className="relative h-[250px] overflow-hidden" style={{ backgroundImage: coverUrl ? `${theme.heroOverlay}, url(${coverUrl})` : theme.accentGradientVertical }}>
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(255,255,255,0.24),transparent_30%)]" />
-      {coverUrl ? <div className="absolute inset-x-5 top-5 h-[126px] rounded-[28px] bg-cover bg-center opacity-20" style={{ backgroundImage: `url(${coverUrl})` }} /> : null}
-      <div className="relative">
-        <div className="flex items-center justify-center">
-          <span className="rounded-full px-4 py-1.5 text-[10px] font-semibold uppercase tracking-[0.28em]" style={{ backgroundColor: "rgba(255,255,255,0.14)", color: "rgba(255,255,255,0.82)" }}>Agendamento online</span>
-        </div>
-        <div className="mt-6 rounded-[32px] px-5 py-5 shadow-[0_22px_46px_-28px_rgba(15,23,42,0.4)] backdrop-blur-sm" style={{ backgroundColor: "rgba(255,255,255,0.16)", color: theme.inverseText }}>
-          <div className="flex items-center gap-4">
-            <div className="flex h-16 w-16 items-center justify-center overflow-hidden rounded-[22px] shadow-[0_18px_40px_-26px_rgba(15,23,42,0.8)]" style={{ backgroundColor: "rgba(255,255,255,0.18)" }}>{logoUrl ? <img src={logoUrl} alt={title} className="h-full w-full object-cover" /> : <span className="text-2xl font-black">{title.slice(0, 1).toUpperCase()}</span>}</div>
-            <div className="min-w-0">
-              <h1 className="text-[30px] font-black leading-[1.02]">{title}</h1>
-              <p className="mt-2 text-[13px] leading-5 text-white/82">{description}</p>
-            </div>
-          </div>
-          <div className="mt-5 grid grid-cols-2 gap-3">
-            <div className="rounded-[18px] px-4 py-3" style={{ backgroundColor: "rgba(255,255,255,0.12)" }}>
-              <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-white/65">Fluxo</p>
-              <p className="mt-1 text-[13px] font-bold">Escolha dia, profissional, serviço e horário</p>
-            </div>
-            <div className="rounded-[18px] px-4 py-3" style={{ backgroundColor: "rgba(255,255,255,0.12)" }}>
-              <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-white/65">Reserva</p>
-              <p className="mt-1 text-[13px] font-bold">Confirmação em poucos passos</p>
-            </div>
-          </div>
-        </div>
+      <div className="relative flex h-full flex-col justify-end p-5" style={{ color: theme.text }}>
+        <div className="flex h-16 w-16 items-center justify-center overflow-hidden rounded-[22px] shadow-[0_18px_40px_-26px_rgba(15,23,42,0.8)] backdrop-blur-sm" style={{ backgroundColor: "rgba(255,255,255,0.18)" }}>{logoUrl ? <img src={logoUrl} alt={title} className="h-full w-full object-cover" /> : <span className="text-2xl font-black">{title.slice(0, 1).toUpperCase()}</span>}</div>
+        <p className="mt-5 text-[11px] font-semibold uppercase tracking-[0.36em]" style={{ color: theme.textMuted }}>Agendamento online</p>
+        <h1 className="mt-2 text-[38px] font-black leading-[1.02]">{title}</h1>
+        <p className="mt-3 max-w-[320px] text-[14px] leading-6" style={{ color: theme.textMuted }}>{description}</p>
       </div>
     </section>
   );
 }
 
-function GradientHeader({ theme, title, eyebrow, onBack }: { theme: ReturnType<typeof buildPublicPageTheme>; title: string; eyebrow?: string; onBack?: () => void }) {
+function GradientHeader({ theme, title, onBack }: { theme: ReturnType<typeof buildPublicPageTheme>; title: string; onBack?: () => void }) {
   return (
     <section className="px-5 pb-6 pt-5" style={{ background: theme.accentGradientVertical, color: theme.inverseText }}>
       <div className="flex items-center justify-between gap-3">
         <button type="button" onClick={onBack} className={cn("flex h-10 w-10 items-center justify-center rounded-full transition", onBack ? "opacity-100" : "pointer-events-none opacity-0")} style={{ backgroundColor: "rgba(255,255,255,0.12)" }}><ArrowLeft size={18} /></button>
         <div className="text-center">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.34em]" style={{ color: "rgba(255,255,255,0.72)" }}>{eyebrow || "App Gende"}</p>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.34em]" style={{ color: "rgba(255,255,255,0.72)" }}>App Gende</p>
           <h1 className="mt-2 text-[18px] font-black uppercase tracking-[0.08em]">{title}</h1>
-          <div className="mx-auto mt-3 h-1 w-16 rounded-full bg-white/25" />
         </div>
         <div className="h-10 w-10" />
       </div>
@@ -892,39 +795,26 @@ function GradientHeader({ theme, title, eyebrow, onBack }: { theme: ReturnType<t
   );
 }
 
-function StepProgress({ theme, step, total = 4 }: { theme: ReturnType<typeof buildPublicPageTheme>; step: number; total?: number }) {
-  return <div className="flex gap-2.5 rounded-full p-1.5" style={{ backgroundColor: theme.surfaceMuted }}>{Array.from({ length: total }, (_, index) => index + 1).map((item) => <div key={item} className="h-2 flex-1 rounded-full transition-opacity" style={{ backgroundColor: step >= item ? theme.accent : theme.accentFaint, opacity: step >= item ? 1 : 0.45 }} />)}</div>;
+function StepProgress({ theme, step }: { theme: ReturnType<typeof buildPublicPageTheme>; step: number }) {
+  return <div className="flex gap-2.5">{[1, 2, 3, 4].map((item) => <div key={item} className="h-2 flex-1 rounded-full transition-opacity" style={{ backgroundColor: step >= item ? theme.accent : theme.accentFaint, opacity: step >= item ? 1 : 0.45 }} />)}</div>;
 }
 
 function SectionIntro({ theme, eyebrow, title, subtitle }: { theme: ReturnType<typeof buildPublicPageTheme>; eyebrow: string; title: string; subtitle: string }) {
   return (
     <div className="mb-4">
-      <p className="text-[10px] font-semibold uppercase tracking-[0.34em]" style={{ color: theme.textSoft }}>{eyebrow}</p>
-      <h2 className="mt-2 text-[28px] font-black leading-[1.02] sm:text-[30px]" style={{ color: theme.text }}>{title}</h2>
-      <p className="mt-2 max-w-[340px] text-[14px] leading-6" style={{ color: theme.textMuted }}>{subtitle}</p>
+      <p className="text-[11px] font-semibold uppercase tracking-[0.3em]" style={{ color: theme.textMuted }}>{eyebrow}</p>
+      <h2 className="mt-2 text-[28px] font-black leading-[1.05]" style={{ color: theme.text }}>{title}</h2>
+      <p className="mt-2 text-[14px] leading-6" style={{ color: theme.textMuted }}>{subtitle}</p>
     </div>
   );
 }
 
 function PrimaryAction({ theme, children, className, disabled, onClick }: { theme: ReturnType<typeof buildPublicPageTheme>; children: ReactNode; className?: string; disabled?: boolean; onClick: () => void }) {
-  return <button type="button" disabled={disabled} onClick={onClick} className={cn("h-14 w-full rounded-full text-[15px] font-bold transition active:scale-[0.99] hover:opacity-95 disabled:opacity-60", className)} style={{ background: theme.accentGradient, color: theme.inverseText, boxShadow: `0 24px 40px -24px ${theme.accentShadow}` }}>{children}</button>;
+  return <button type="button" disabled={disabled} onClick={onClick} className={cn("h-14 w-full rounded-full text-[15px] font-bold transition hover:opacity-95 disabled:opacity-60", className)} style={{ background: theme.accentGradient, color: theme.inverseText, boxShadow: `0 24px 40px -24px ${theme.accentShadow}` }}>{children}</button>;
 }
 
 function DetailCard({ theme, label, value }: { theme: ReturnType<typeof buildPublicPageTheme>; label: string; value: string }) {
-  return <div className="rounded-[26px] px-4 py-4 shadow-[0_18px_38px_-28px_rgba(15,23,42,0.24)]" style={{ backgroundColor: theme.surface }}><p className="text-[10px] font-semibold uppercase tracking-[0.28em]" style={{ color: theme.textSoft }}>{label}</p><p className="mt-2 text-[15px] font-bold leading-6 sm:text-[16px]" style={{ color: theme.text }}>{value || "-"}</p></div>;
-}
-
-function SelectionStrip({ theme, items }: { theme: ReturnType<typeof buildPublicPageTheme>; items: Array<{ label: string; value: string }> }) {
-  return (
-    <div className="grid gap-3 sm:grid-cols-3">
-      {items.map((item) => (
-        <div key={`${item.label}:${item.value}`} className="rounded-[22px] border px-4 py-3" style={{ borderColor: theme.border, backgroundColor: theme.surfaceMuted }}>
-          <p className="text-[10px] font-semibold uppercase tracking-[0.24em]" style={{ color: theme.textSoft }}>{item.label}</p>
-          <p className="mt-1 truncate text-[12px] font-bold sm:text-[13px]" style={{ color: theme.text }}>{item.value}</p>
-        </div>
-      ))}
-    </div>
-  );
+  return <div className="rounded-[24px] px-4 py-4 shadow-[0_18px_38px_-28px_rgba(15,23,42,0.32)]" style={{ backgroundColor: theme.surface }}><p className="text-[11px] font-semibold uppercase tracking-[0.26em]" style={{ color: theme.textSoft }}>{label}</p><p className="mt-2 text-[16px] font-bold leading-6" style={{ color: theme.text }}>{value || "-"}</p></div>;
 }
 
 function SummaryRow({ theme, label, value, last = false }: { theme: ReturnType<typeof buildPublicPageTheme>; label: string; value: string; last?: boolean }) {

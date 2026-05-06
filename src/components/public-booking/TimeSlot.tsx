@@ -14,7 +14,7 @@ export function TimeSlot({ theme, label, selected, onClick }: TimeSlotProps) {
       type="button"
       onClick={onClick}
       className={cn(
-        "h-12 rounded-[18px] border px-3 text-[14px] font-bold transition active:scale-[0.99]",
+        "h-11 rounded-full border text-[13px] font-bold transition",
         selected ? "shadow-[0_20px_30px_-18px_rgba(190,24,93,0.55)]" : "",
       )}
       style={
