@@ -365,10 +365,12 @@ const Bookings = () => {
 
     setRescheduleLoading(true);
     try {
-      const { data, error } = await api.rpc("reschedule_booking" as never, {
-        p_booking_id: detailBooking.id,
-        p_new_start_time: nextStartIso,
-      } as never);
+      const { data, error } = await api.functions.invoke("reschedule-booking", {
+        body: {
+          bookingId: detailBooking.id,
+          newStartTime: nextStartIso,
+        },
+      });
 
       if (error) throw error;
 
