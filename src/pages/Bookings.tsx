@@ -74,7 +74,6 @@ const statusBadgeClass: Record<string, string> = {
 };
 
 const DAY_HOURS = Array.from({ length: 15 }, (_, i) => i + 7); // 7-21
-const RESCHEDULE_BUFFER_MINUTES = 10;
 
 const getBookingDurationMinutes = (booking: any) => {
   const explicitDuration = Number(booking?.duration_minutes);
@@ -108,48 +107,6 @@ const buildLocalDateTime = (dateValue: string, timeValue: string) => {
   }
 
   return new Date(year, month - 1, day, hour, minute, 0, 0);
-};
-
-const getTimeMinutes = (timeValue: string) => {
-  const [hour, minute] = timeValue.slice(0, 5).split(":").map(Number);
-  if (![hour, minute].every(Number.isFinite)) return null;
-  return hour * 60 + minute;
-};
-
-const hasBlockedTimeConflict = (blockedTimes: any[], startTime: Date, endTime: Date) => {
-  return (blockedTimes || []).some((blocked) => {
-    const blockedStart = new Date(blocked.start_time);
-    const blockedEnd = new Date(blocked.end_time);
-    return startTime < blockedEnd && endTime > blockedStart;
-  });
-};
-
-const hasBookingConflict = ({
-  bookings,
-  bookingId,
-  startTime,
-  endTime,
-  employeeId,
-}: {
-  bookings: any[];
-  bookingId?: string;
-  startTime: string;
-  endTime: string;
-  employeeId?: string | null;
-}) => {
-  const nextStart = new Date(startTime).getTime();
-  const nextEnd = new Date(endTime).getTime();
-
-  return bookings.some((booking) => {
-    if (booking.id === bookingId) return false;
-    if (booking.status === "cancelled") return false;
-    if (employeeId && booking.employee_id !== employeeId) return false;
-
-    const currentStart = new Date(booking.start_time).getTime();
-    const currentEnd = new Date(booking.end_time).getTime() + RESCHEDULE_BUFFER_MINUTES * 60000;
-
-    return nextStart < currentEnd && nextEnd > currentStart;
-  });
 };
 
 const Bookings = () => {
@@ -404,70 +361,32 @@ const Bookings = () => {
       return;
     }
 
-    const dayOfWeek = nextStart.getDay();
-    const wh = workingHours?.find((hour) => hour.day_of_week === dayOfWeek && hour.is_active);
-    if (!wh) {
-      toast.error("Não há expediente configurado para esta data.");
-      return;
-    }
-
-    const workingStart = getTimeMinutes(wh.start_time);
-    const workingEnd = getTimeMinutes(wh.end_time);
-    const nextStartMinutes = nextStart.getHours() * 60 + nextStart.getMinutes();
-    const nextEndMinutes = nextEnd.getHours() * 60 + nextEnd.getMinutes();
-
-    if (
-      workingStart === null ||
-      workingEnd === null ||
-      nextStartMinutes < workingStart ||
-      nextEndMinutes > workingEnd ||
-      !isSameDay(nextStart, nextEnd)
-    ) {
-      toast.error("O novo horário fica fora do expediente configurado.");
-      return;
-    }
-
-    if (hasBlockedTimeConflict(blockedTimes || [], nextStart, nextEnd)) {
-      toast.error("Este horário está bloqueado por uma ausência.");
-      return;
-    }
-
     const nextStartIso = nextStart.toISOString();
-    const nextEndIso = nextEnd.toISOString();
 
     setRescheduleLoading(true);
     try {
-      const { data: targetDayBookings, error } = await api
-        .from("bookings")
-        .select("id, start_time, end_time, status, employee_id")
-        .eq("professional_id", detailBooking.professional_id)
-        .gte("start_time", new Date(nextStart.getFullYear(), nextStart.getMonth(), nextStart.getDate()).toISOString())
-        .lte("start_time", new Date(nextStart.getFullYear(), nextStart.getMonth(), nextStart.getDate(), 23, 59, 59, 999).toISOString());
+      const { data, error } = await api.rpc("reschedule_booking" as never, {
+        p_booking_id: detailBooking.id,
+        p_new_start_time: nextStartIso,
+      } as never);
 
       if (error) throw error;
 
-      if (hasBookingConflict({
-        bookings: targetDayBookings || [],
-        bookingId: detailBooking.id,
-        startTime: nextStartIso,
-        endTime: nextEndIso,
-        employeeId: detailBooking.employee_id,
-      })) {
-        toast.error("Já existe outro agendamento neste horário.");
+      const result = data as { success?: boolean; error?: string; booking?: Record<string, any> } | null;
+      if (!result?.success) {
+        toast.error(result?.error || "Não foi possível remarcar este agendamento.");
         return;
       }
 
-      const updatedBooking = await updateBooking.mutateAsync({
-        id: detailBooking.id,
-        start_time: nextStartIso,
-        end_time: nextEndIso,
-      });
+      const updatedBooking = result.booking || {};
+      const updatedStartTime = String(updatedBooking.start_time || nextStartIso);
+      const updatedEndTime = String(updatedBooking.end_time || nextEnd.toISOString());
 
       setDetailBooking((current: any) => ({
         ...current,
         ...updatedBooking,
-        start_time: nextStartIso,
-        end_time: nextEndIso,
+        start_time: updatedStartTime,
+        end_time: updatedEndTime,
       }));
       setSelectedDate(nextStart);
       toast.success("Agendamento remarcado.");
@@ -480,8 +399,8 @@ const Bookings = () => {
           booking: {
             client_name: detailBooking.client_name,
             client_phone: detailBooking.client_phone,
-            start_time: nextStartIso,
-            end_time: nextEndIso,
+            start_time: updatedStartTime,
+            end_time: updatedEndTime,
             notes: detailBooking.notes,
             service_name: detailBooking.services?.name || "",
           },
@@ -502,8 +421,9 @@ const Bookings = () => {
       } else {
         createGoogleEvent();
       }
-    } catch {
-      toast.error("Erro ao remarcar agendamento.");
+    } catch (err: any) {
+      console.error("Reschedule booking error:", err);
+      toast.error(err?.message || "Erro ao remarcar agendamento.");
     } finally {
       setRescheduleLoading(false);
     }
@@ -862,7 +782,7 @@ const Bookings = () => {
                     <p className="text-sm text-foreground">{detailBooking.notes}</p>
                   </div>
                 )}
-                {["pending", "confirmed"].includes(detailBooking.status) && (
+                {["pending", "confirmed", "no_show"].includes(detailBooking.status) && (
                   <div className="glass-card rounded-xl p-3 space-y-3">
                     <div className="flex items-start gap-2">
                       <CalendarDays size={15} className="text-primary mt-0.5" />
