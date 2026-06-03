@@ -74,6 +74,83 @@ const statusBadgeClass: Record<string, string> = {
 };
 
 const DAY_HOURS = Array.from({ length: 15 }, (_, i) => i + 7); // 7-21
+const RESCHEDULE_BUFFER_MINUTES = 10;
+
+const getBookingDurationMinutes = (booking: any) => {
+  const explicitDuration = Number(booking?.duration_minutes);
+  if (Number.isFinite(explicitDuration) && explicitDuration > 0) return explicitDuration;
+
+  const start = new Date(booking?.start_time).getTime();
+  const end = new Date(booking?.end_time).getTime();
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return 0;
+
+  return Math.round((end - start) / 60000);
+};
+
+const getDateInputValue = (value: string | Date | null | undefined) => {
+  const date = value instanceof Date ? value : new Date(value as string);
+  if (isNaN(date.getTime())) return "";
+  return format(date, "yyyy-MM-dd");
+};
+
+const getTimeInputValue = (value: string | Date | null | undefined) => {
+  const date = value instanceof Date ? value : new Date(value as string);
+  if (isNaN(date.getTime())) return "";
+  return format(date, "HH:mm");
+};
+
+const buildLocalDateTime = (dateValue: string, timeValue: string) => {
+  const [year, month, day] = dateValue.split("-").map(Number);
+  const [hour, minute] = timeValue.split(":").map(Number);
+
+  if (![year, month, day, hour, minute].every(Number.isFinite)) {
+    return null;
+  }
+
+  return new Date(year, month - 1, day, hour, minute, 0, 0);
+};
+
+const getTimeMinutes = (timeValue: string) => {
+  const [hour, minute] = timeValue.slice(0, 5).split(":").map(Number);
+  if (![hour, minute].every(Number.isFinite)) return null;
+  return hour * 60 + minute;
+};
+
+const hasBlockedTimeConflict = (blockedTimes: any[], startTime: Date, endTime: Date) => {
+  return (blockedTimes || []).some((blocked) => {
+    const blockedStart = new Date(blocked.start_time);
+    const blockedEnd = new Date(blocked.end_time);
+    return startTime < blockedEnd && endTime > blockedStart;
+  });
+};
+
+const hasBookingConflict = ({
+  bookings,
+  bookingId,
+  startTime,
+  endTime,
+  employeeId,
+}: {
+  bookings: any[];
+  bookingId?: string;
+  startTime: string;
+  endTime: string;
+  employeeId?: string | null;
+}) => {
+  const nextStart = new Date(startTime).getTime();
+  const nextEnd = new Date(endTime).getTime();
+
+  return bookings.some((booking) => {
+    if (booking.id === bookingId) return false;
+    if (booking.status === "cancelled") return false;
+    if (employeeId && booking.employee_id !== employeeId) return false;
+
+    const currentStart = new Date(booking.start_time).getTime();
+    const currentEnd = new Date(booking.end_time).getTime() + RESCHEDULE_BUFFER_MINUTES * 60000;
+
+    return nextStart < currentEnd && nextEnd > currentStart;
+  });
+};
 
 const Bookings = () => {
   const [selectedDate, setSelectedDate] = useState(new Date());
@@ -84,6 +161,9 @@ const Bookings = () => {
   const [paymentAmount, setPaymentAmount] = useState("");
   const [paymentLoading, setPaymentLoading] = useState(false);
   const [bookingPayments, setBookingPayments] = useState<any[]>([]);
+  const [rescheduleDate, setRescheduleDate] = useState("");
+  const [rescheduleTime, setRescheduleTime] = useState("");
+  const [rescheduleLoading, setRescheduleLoading] = useState(false);
 
   // Data fetching
   const { data: dayBookings, isLoading: dayLoading } = useBookings(selectedDate);
@@ -116,6 +196,8 @@ const Bookings = () => {
     if (detailBooking?.id) {
       setPaymentMethod("");
       setPaymentAmount("");
+      setRescheduleDate(getDateInputValue(detailBooking.start_time));
+      setRescheduleTime(getTimeInputValue(detailBooking.start_time));
       api
         .from("payments")
         .select("id, amount, status, payment_method, created_at")
@@ -123,6 +205,8 @@ const Bookings = () => {
         .then(({ data }) => setBookingPayments(data || []));
     } else {
       setBookingPayments([]);
+      setRescheduleDate("");
+      setRescheduleTime("");
     }
   }, [detailBooking?.id]);
 
@@ -293,6 +377,135 @@ const Bookings = () => {
       setDetailBooking(null);
     } catch {
       toast.error("Erro ao excluir");
+    }
+  };
+
+  const handleRescheduleBooking = async () => {
+    if (!detailBooking || !professional) return;
+
+    const nextStart = buildLocalDateTime(rescheduleDate, rescheduleTime);
+    if (!nextStart || isNaN(nextStart.getTime())) {
+      toast.error("Informe uma nova data e um novo horário válidos.");
+      return;
+    }
+
+    const durationMinutes = getBookingDurationMinutes(detailBooking);
+    if (durationMinutes <= 0) {
+      toast.error("Não foi possível calcular a duração deste agendamento.");
+      return;
+    }
+
+    const nextEnd = new Date(nextStart.getTime() + durationMinutes * 60000);
+    const currentStartMs = new Date(detailBooking.start_time).getTime();
+    const currentEndMs = new Date(detailBooking.end_time).getTime();
+
+    if (currentStartMs === nextStart.getTime() && currentEndMs === nextEnd.getTime()) {
+      toast.info("Escolha um horário diferente para remarcar.");
+      return;
+    }
+
+    const dayOfWeek = nextStart.getDay();
+    const wh = workingHours?.find((hour) => hour.day_of_week === dayOfWeek && hour.is_active);
+    if (!wh) {
+      toast.error("Não há expediente configurado para esta data.");
+      return;
+    }
+
+    const workingStart = getTimeMinutes(wh.start_time);
+    const workingEnd = getTimeMinutes(wh.end_time);
+    const nextStartMinutes = nextStart.getHours() * 60 + nextStart.getMinutes();
+    const nextEndMinutes = nextEnd.getHours() * 60 + nextEnd.getMinutes();
+
+    if (
+      workingStart === null ||
+      workingEnd === null ||
+      nextStartMinutes < workingStart ||
+      nextEndMinutes > workingEnd ||
+      !isSameDay(nextStart, nextEnd)
+    ) {
+      toast.error("O novo horário fica fora do expediente configurado.");
+      return;
+    }
+
+    if (hasBlockedTimeConflict(blockedTimes || [], nextStart, nextEnd)) {
+      toast.error("Este horário está bloqueado por uma ausência.");
+      return;
+    }
+
+    const nextStartIso = nextStart.toISOString();
+    const nextEndIso = nextEnd.toISOString();
+
+    setRescheduleLoading(true);
+    try {
+      const { data: targetDayBookings, error } = await api
+        .from("bookings")
+        .select("id, start_time, end_time, status, employee_id")
+        .eq("professional_id", detailBooking.professional_id)
+        .gte("start_time", new Date(nextStart.getFullYear(), nextStart.getMonth(), nextStart.getDate()).toISOString())
+        .lte("start_time", new Date(nextStart.getFullYear(), nextStart.getMonth(), nextStart.getDate(), 23, 59, 59, 999).toISOString());
+
+      if (error) throw error;
+
+      if (hasBookingConflict({
+        bookings: targetDayBookings || [],
+        bookingId: detailBooking.id,
+        startTime: nextStartIso,
+        endTime: nextEndIso,
+        employeeId: detailBooking.employee_id,
+      })) {
+        toast.error("Já existe outro agendamento neste horário.");
+        return;
+      }
+
+      const updatedBooking = await updateBooking.mutateAsync({
+        id: detailBooking.id,
+        start_time: nextStartIso,
+        end_time: nextEndIso,
+      });
+
+      setDetailBooking((current: any) => ({
+        ...current,
+        ...updatedBooking,
+        start_time: nextStartIso,
+        end_time: nextEndIso,
+      }));
+      setSelectedDate(nextStart);
+      toast.success("Agendamento remarcado.");
+
+      const createGoogleEvent = () => api.functions.invoke("google-calendar-sync", {
+        body: {
+          action: "create_event",
+          professional_id: professional.id,
+          booking_id: detailBooking.id,
+          booking: {
+            client_name: detailBooking.client_name,
+            client_phone: detailBooking.client_phone,
+            start_time: nextStartIso,
+            end_time: nextEndIso,
+            notes: detailBooking.notes,
+            service_name: detailBooking.services?.name || "",
+          },
+        },
+      }).catch(() => { /* silent fail */ });
+
+      if (detailBooking.google_calendar_event_id) {
+        api.functions.invoke("google-calendar-sync", {
+          body: {
+            action: "delete_event",
+            professional_id: professional.id,
+            booking_id: detailBooking.id,
+            event_id: detailBooking.google_calendar_event_id,
+          },
+        })
+          .then(createGoogleEvent)
+          .catch(() => { /* silent fail */ });
+      } else {
+        createGoogleEvent();
+      }
+    } catch {
+      toast.error("Erro ao remarcar agendamento.");
+    } finally {
+      setRescheduleLoading(false);
     }
   };
 
@@ -647,6 +860,60 @@ const Bookings = () => {
                   <div className="glass-card rounded-xl p-3">
                     <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1">Observações</p>
                     <p className="text-sm text-foreground">{detailBooking.notes}</p>
+                  </div>
+                )}
+                {["pending", "confirmed"].includes(detailBooking.status) && (
+                  <div className="glass-card rounded-xl p-3 space-y-3">
+                    <div className="flex items-start gap-2">
+                      <CalendarDays size={15} className="text-primary mt-0.5" />
+                      <div>
+                        <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1">Remarcar horário</p>
+                        <p className="text-xs text-muted-foreground">Altere a data e o início do atendimento sem mudar cliente, serviço ou pagamento.</p>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <Label className="text-xs text-muted-foreground mb-1">Nova data</Label>
+                        <Input
+                          type="date"
+                          value={rescheduleDate}
+                          onChange={(event) => setRescheduleDate(event.target.value)}
+                          className="h-9"
+                        />
+                      </div>
+                      <div>
+                        <Label className="text-xs text-muted-foreground mb-1">Novo horário</Label>
+                        <Input
+                          type="time"
+                          step="600"
+                          value={rescheduleTime}
+                          onChange={(event) => setRescheduleTime(event.target.value)}
+                          className="h-9"
+                        />
+                      </div>
+                    </div>
+                    {rescheduleDate && rescheduleTime && (() => {
+                      const previewStart = buildLocalDateTime(rescheduleDate, rescheduleTime);
+                      const durationMinutes = getBookingDurationMinutes(detailBooking);
+                      if (!previewStart || durationMinutes <= 0) return null;
+                      const previewEnd = new Date(previewStart.getTime() + durationMinutes * 60000);
+
+                      return (
+                        <p className="text-[10px] text-muted-foreground">
+                          Novo horário: {format(previewStart, "dd/MM HH:mm")} - {format(previewEnd, "HH:mm")} ({durationMinutes} min)
+                        </p>
+                      );
+                    })()}
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={handleRescheduleBooking}
+                      disabled={!rescheduleDate || !rescheduleTime || rescheduleLoading || updateBooking.isPending}
+                      className="w-full"
+                    >
+                      {rescheduleLoading ? <Loader2 className="animate-spin mr-2" size={14} /> : <Clock size={14} className="mr-2" />}
+                      Salvar novo horário
+                    </Button>
                   </div>
                 )}
                 {bookingIdsWithCommission.has(detailBooking.id) && (
