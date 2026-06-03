@@ -49,6 +49,32 @@ const safeFormat = (date: Date | string | null | undefined, formatStr: string, o
   }
 };
 
+const getFunctionErrorMessage = async (error: unknown) => {
+  const context = (error as { context?: unknown } | null)?.context;
+  const response = context instanceof Response ? context : null;
+
+  if (response) {
+    try {
+      const payload = await response.clone().json();
+      if (payload && typeof payload === "object") {
+        const body = payload as { error?: unknown; message?: unknown; msg?: unknown };
+        const message = body.error || body.message || body.msg;
+        if (typeof message === "string" && message.trim()) return message;
+      }
+    } catch {
+      try {
+        const text = await response.clone().text();
+        if (text.trim()) return text;
+      } catch {
+        // Fall through to generic error message.
+      }
+    }
+  }
+
+  const message = (error as { message?: unknown } | null)?.message;
+  return typeof message === "string" && message.trim() ? message : null;
+};
+
 const statusColors: Record<string, string> = {
   confirmed: "border-l-green-500 bg-green-500/10",
   pending: "border-l-yellow-500 bg-yellow-500/10",
@@ -372,7 +398,11 @@ const Bookings = () => {
         },
       });
 
-      if (error) throw error;
+      if (error) {
+        const message = await getFunctionErrorMessage(error);
+        toast.error(message || "Erro ao remarcar agendamento.");
+        return;
+      }
 
       const result = data as { success?: boolean; error?: string; booking?: Record<string, any> } | null;
       if (!result?.success) {
@@ -425,7 +455,8 @@ const Bookings = () => {
       }
     } catch (err: any) {
       console.error("Reschedule booking error:", err);
-      toast.error(err?.message || "Erro ao remarcar agendamento.");
+      const message = await getFunctionErrorMessage(err);
+      toast.error(message || "Erro ao remarcar agendamento.");
     } finally {
       setRescheduleLoading(false);
     }
